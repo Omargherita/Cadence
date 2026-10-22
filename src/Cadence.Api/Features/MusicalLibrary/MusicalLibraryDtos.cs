@@ -1,4 +1,5 @@
 using Cadence.Api.Domain.MusicalLibrary;
+using Cadence.Api.Domain.PianoMentor;
 
 namespace Cadence.Api.Features.MusicalLibrary;
 
@@ -27,7 +28,8 @@ public record PracticeSessionResponse(
     int DurationMinutes,
     string TargetSection,
     string UserSelfReflection,
-    string NextSessionGoal
+    string NextSessionGoal,
+    List<PracticeTake>? Takes = null
 );
 
 public record PieceResponse(
@@ -37,7 +39,11 @@ public record PieceResponse(
     RepertoireBucket Bucket,
     string PersonalGoals,
     string InterpretationNotes,
+    ScoreCapabilityTier ScoreCapabilityTier,
+    string? ScoreFilePath,
     DateTimeOffset? LastPracticedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    List<PracticeSessionResponse> Sessions
+    List<PracticeSessionResponse> Sessions,
+    List<PieceWeakness>? Weaknesses = null
 );
+

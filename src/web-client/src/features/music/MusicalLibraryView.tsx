@@ -79,6 +79,7 @@ export const MusicalLibraryView: FC<MusicalLibraryViewProps> = ({
         piece={activePiece}
         onBack={() => onSelectPiece(null)}
         onLogSession={onLogSession}
+        onRefresh={onRefreshPieces}
         isLoading={isLoading}
       />
     );

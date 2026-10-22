@@ -16,34 +16,42 @@ public static class MusicalLibraryEndpoints
         {
             var pieces = await db.Pieces
                 .AsNoTracking()
+                .Include(p => p.Weaknesses)
+                .Include(p => p.Sessions)
+                    .ThenInclude(s => s.Takes)
                 .OrderBy(p => p.Bucket)
                 .ThenByDescending(p => p.UpdatedAtUtc)
-                .Select(p => new PieceResponse(
-                    p.Id,
-                    p.Title,
-                    p.Composer,
-                    p.Bucket,
-                    p.PersonalGoals,
-                    p.InterpretationNotes,
-                    p.LastPracticedAtUtc,
-                    p.UpdatedAtUtc,
-                    p.Sessions
-                        .OrderByDescending(s => s.StartedAtUtc)
-                        .Take(3)
-                        .Select(s => new PracticeSessionResponse(
-                            s.Id,
-                            s.PieceId,
-                            s.StartedAtUtc,
-                            s.DurationMinutes,
-                            s.TargetSection,
-                            s.UserSelfReflection,
-                            s.NextSessionGoal
-                        ))
-                        .ToList()
-                ))
                 .ToListAsync();
 
-            return Results.Ok(pieces);
+            var response = pieces.Select(p => new PieceResponse(
+                p.Id,
+                p.Title,
+                p.Composer,
+                p.Bucket,
+                p.PersonalGoals,
+                p.InterpretationNotes,
+                p.ScoreCapabilityTier,
+                p.ScoreFilePath,
+                p.LastPracticedAtUtc,
+                p.UpdatedAtUtc,
+                p.Sessions
+                    .OrderByDescending(s => s.StartedAtUtc)
+                    .Take(10)
+                    .Select(s => new PracticeSessionResponse(
+                        s.Id,
+                        s.PieceId,
+                        s.StartedAtUtc,
+                        s.DurationMinutes,
+                        s.TargetSection,
+                        s.UserSelfReflection,
+                        s.NextSessionGoal,
+                        s.Takes.OrderBy(t => t.TakeNumber).ToList()
+                    ))
+                    .ToList(),
+                p.Weaknesses.OrderBy(w => w.Status).ThenByDescending(w => w.UpdatedAtUtc).ToList()
+            )).ToList();
+
+            return Results.Ok(response);
         });
 
         group.MapPost("/", async ([FromBody] CreatePieceRequest request, CadenceDbContext db) =>
@@ -94,8 +102,11 @@ public static class MusicalLibraryEndpoints
                 piece.Bucket,
                 piece.PersonalGoals,
                 piece.InterpretationNotes,
+                piece.ScoreCapabilityTier,
+                piece.ScoreFilePath,
                 piece.LastPracticedAtUtc,
                 piece.UpdatedAtUtc,
+                [],
                 []
             );
 
@@ -104,39 +115,46 @@ public static class MusicalLibraryEndpoints
 
         group.MapGet("/{id:guid}", async (Guid id, CadenceDbContext db) =>
         {
-            var piece = await db.Pieces
+            var p = await db.Pieces
                 .AsNoTracking()
-                .Where(p => p.Id == id)
-                .Select(p => new PieceResponse(
-                    p.Id,
-                    p.Title,
-                    p.Composer,
-                    p.Bucket,
-                    p.PersonalGoals,
-                    p.InterpretationNotes,
-                    p.LastPracticedAtUtc,
-                    p.UpdatedAtUtc,
-                    p.Sessions
-                        .OrderByDescending(s => s.StartedAtUtc)
-                        .Select(s => new PracticeSessionResponse(
-                            s.Id,
-                            s.PieceId,
-                            s.StartedAtUtc,
-                            s.DurationMinutes,
-                            s.TargetSection,
-                            s.UserSelfReflection,
-                            s.NextSessionGoal
-                        ))
-                        .ToList()
-                ))
-                .FirstOrDefaultAsync();
+                .Include(p => p.Weaknesses)
+                .Include(p => p.Sessions)
+                    .ThenInclude(s => s.Takes)
+                .FirstOrDefaultAsync(p => p.Id == id);
 
-            if (piece is null)
+            if (p is null)
             {
                 return Results.NotFound(new { error = $"Piece with ID '{id}' was not found." });
             }
 
-            return Results.Ok(piece);
+            var response = new PieceResponse(
+                p.Id,
+                p.Title,
+                p.Composer,
+                p.Bucket,
+                p.PersonalGoals,
+                p.InterpretationNotes,
+                p.ScoreCapabilityTier,
+                p.ScoreFilePath,
+                p.LastPracticedAtUtc,
+                p.UpdatedAtUtc,
+                p.Sessions
+                    .OrderByDescending(s => s.StartedAtUtc)
+                    .Select(s => new PracticeSessionResponse(
+                        s.Id,
+                        s.PieceId,
+                        s.StartedAtUtc,
+                        s.DurationMinutes,
+                        s.TargetSection,
+                        s.UserSelfReflection,
+                        s.NextSessionGoal,
+                        s.Takes.OrderBy(t => t.TakeNumber).ToList()
+                    ))
+                    .ToList(),
+                p.Weaknesses.OrderBy(w => w.Status).ThenByDescending(w => w.UpdatedAtUtc).ToList()
+            );
+
+            return Results.Ok(response);
         });
 
         group.MapPost("/{pieceId:guid}/sessions", async (Guid pieceId, [FromBody] CreatePracticeSessionRequest request, CadenceDbContext db) =>

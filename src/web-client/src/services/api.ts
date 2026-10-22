@@ -2,9 +2,12 @@ import {
   CreatePieceRequest,
   CreatePracticeSessionRequest,
   CreateTaskRequest,
+  CreateWeaknessRequest,
   HealthStatus,
   Piece,
+  PieceWeakness,
   PracticeSession,
+  PracticeTake,
   TaskItem,
 } from '../types/cadence';
 
@@ -91,6 +94,66 @@ export const api = {
       throw new Error(err.error || `Failed to log practice session: ${res.statusText}`);
     }
     return res.json();
+  },
+
+  async uploadScore(pieceId: string, file: File): Promise<{ pieceId: string; scoreCapabilityTier: string; scoreFilePath: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${BASE_URL}/pieces/${pieceId}/score`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to upload score: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  getScoreUrl(pieceId: string): string {
+    return `${BASE_URL}/pieces/${pieceId}/score`;
+  },
+
+  async addWeakness(pieceId: string, req: CreateWeaknessRequest): Promise<PieceWeakness> {
+    const res = await fetch(`${BASE_URL}/pieces/${pieceId}/weaknesses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to add weakness: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async getWeaknesses(pieceId: string): Promise<PieceWeakness[]> {
+    const res = await fetch(`${BASE_URL}/pieces/${pieceId}/weaknesses`);
+    if (!res.ok) throw new Error(`Failed to fetch weaknesses: ${res.statusText}`);
+    return res.json();
+  },
+
+  async uploadTake(pieceId: string, sessionId: string, formData: FormData): Promise<PracticeTake> {
+    const res = await fetch(`${BASE_URL}/pieces/${pieceId}/sessions/${sessionId}/takes`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to analyze take: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async getTakes(pieceId: string, sessionId: string): Promise<PracticeTake[]> {
+    const res = await fetch(`${BASE_URL}/pieces/${pieceId}/sessions/${sessionId}/takes`);
+    if (!res.ok) throw new Error(`Failed to fetch takes: ${res.statusText}`);
+    return res.json();
+  },
+
+  getMediaUrl(relativePath: string): string {
+    const clean = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    return `${BASE_URL.replace(/\/api$/, '')}/api/media/${clean}`;
   },
 
   async triggerBackup(): Promise<{ backupPath: string; timestampUtc: string }> {

@@ -199,9 +199,12 @@ export const cadenceRepository = {
       bucket: req.bucket,
       personalGoals: req.personalGoals || '',
       interpretationNotes: req.interpretationNotes || '',
+      scoreCapabilityTier: 'None',
+      scoreFilePath: null,
       lastPracticedAtUtc: null,
       updatedAtUtc: now,
       sessions: [],
+      weaknesses: [],
     };
 
     await db.pieces.put(localPiece);

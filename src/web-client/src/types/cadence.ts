@@ -17,6 +17,163 @@ export type RepertoireBucket =
   | 'Maintenance'
   | 'FutureExploration';
 
+export type ScoreCapabilityTier =
+  | 'None'
+  | 'VisualPdfOnly'
+  | 'MachineReadableAligned';
+
+export type WeaknessCategory =
+  | 'PitchAccuracy'
+  | 'RhythmAndTempo'
+  | 'DynamicsAndBalance'
+  | 'Voicing'
+  | 'ArticulationAndPedal'
+  | 'PhrasingAndRubato'
+  | 'PhysicalTension';
+
+export type WeaknessStatus =
+  | 'Active'
+  | 'Improving'
+  | 'Resolved';
+
+export type TakeScope =
+  | 'PassageClip'
+  | 'FullPerformance';
+
+export type MediaSourceQuality =
+  | 'PhoneMicCompressed'
+  | 'UncompressedAudio'
+  | 'DirectMidi';
+
+export type OriginalMediaType =
+  | 'AudioMp3'
+  | 'VideoMp4';
+
+export type ComparisonVerdict =
+  | 'ClearImprovement'
+  | 'SlightImprovement'
+  | 'NoChange'
+  | 'Regressed'
+  | 'FirstTakeInSession';
+
+export type WeaknessEvaluationResult =
+  | 'ImprovedToday'
+  | 'PersistedToday'
+  | 'RegressedToday'
+  | 'NotTestedToday';
+
+export type EvidenceSource =
+  | 'ObjectiveDsp'
+  | 'AudioPerceptual'
+  | 'VideoPosture'
+  | 'UserSelfReport';
+
+export type ConfidenceLevel =
+  | 'High'
+  | 'Medium'
+  | 'Low';
+
+export interface PieceWeakness {
+  id: string;
+  pieceId: string;
+  category: WeaknessCategory;
+  location: string;
+  description: string;
+  status: WeaknessStatus;
+  occurrenceCount: number;
+  consecutiveCleanSessions: number;
+  lastEvaluatedSessionDate: string | null;
+  updatedAtUtc: string;
+}
+
+export interface CreateWeaknessRequest {
+  category: WeaknessCategory;
+  location: string;
+  description: string;
+}
+
+export interface IntraSessionComparison {
+  comparedAgainstTakeNumber: number | null;
+  comparisonVerdict: ComparisonVerdict;
+  whatChanged: string;
+}
+
+export interface EvidenceBreakdown {
+  objectiveFindingsSummary: string;
+  artisticAndInterpretiveJudgment: string;
+}
+
+export interface WeaknessEvaluation {
+  weaknessId: string;
+  evaluation: WeaknessEvaluationResult;
+  timestampEvidence: string;
+  reasoning: string;
+}
+
+export interface NewlyDetectedIssue {
+  category: WeaknessCategory;
+  timestampRange: string;
+  measureRange: string;
+  evidenceSource: EvidenceSource;
+  confidenceLevel: ConfidenceLevel;
+  musicalProblem: string;
+  whyItMattersArtistically: string;
+  promoteToTrackedWeakness: boolean;
+}
+
+export interface ImmediateNextTakeDrill {
+  shouldRecordAnotherTakeNow: boolean;
+  instruction: string;
+  whatToListenFor: string;
+  targetDurationMinutes: number;
+}
+
+export interface PracticePlanDrill {
+  targetSection: string;
+  linkedWeaknessId: string | null;
+  practiceMethod: string;
+  whatToListenFor: string;
+  measurableSuccessCriteria: string;
+  durationMinutes: number;
+}
+
+export interface NextSessionPracticePlan {
+  isFinalizedForNextSession: boolean;
+  recommendedDurationMinutes: number;
+  drills: PracticePlanDrill[];
+}
+
+export interface MentorAssessment {
+  schemaVersion: string;
+  mentorCritique: string;
+  analysisLimitationsNote: string;
+  intraSessionComparison: IntraSessionComparison;
+  evidenceBreakdown: EvidenceBreakdown;
+  existingWeaknessEvaluations: WeaknessEvaluation[];
+  newlyDetectedIssues: NewlyDetectedIssue[];
+  diagnosticQuestionsForStudent: string[];
+  immediateNextTakeDrill: ImmediateNextTakeDrill;
+  nextSessionPracticePlan: NextSessionPracticePlan;
+}
+
+export interface PracticeTake {
+  id: string;
+  practiceSessionId: string;
+  takeNumber: number;
+  scope: TakeScope;
+  targetSection: string;
+  userSelfReflection: string;
+  attachedPdfPages: string;
+  includeVideoPostureAnalysis: boolean;
+  originalMediaRelativePath: string;
+  extractedAudioRelativePath: string;
+  originalMediaType: OriginalMediaType;
+  sourceQuality: MediaSourceQuality;
+  durationSeconds: number | null;
+  createdAtUtc: string;
+  assessment: MentorAssessment | null;
+}
+
 export interface TaskItem {
   id: string;
   title: string;
@@ -44,6 +201,7 @@ export interface PracticeSession {
   targetSection: string;
   userSelfReflection: string;
   nextSessionGoal: string;
+  takes?: PracticeTake[];
 }
 
 export interface CreatePracticeSessionRequest {
@@ -62,9 +220,12 @@ export interface Piece {
   bucket: RepertoireBucket;
   personalGoals: string;
   interpretationNotes: string;
+  scoreCapabilityTier: ScoreCapabilityTier;
+  scoreFilePath: string | null;
   lastPracticedAtUtc: string | null;
   updatedAtUtc: string;
   sessions: PracticeSession[];
+  weaknesses?: PieceWeakness[];
 }
 
 export interface CreatePieceRequest {

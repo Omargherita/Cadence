@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Cadence.Api.Features.MusicalLibrary;
 using Cadence.Api.Features.Organizer;
+using Cadence.Api.Features.PianoMentor;
 using Cadence.Api.Features.System;
 using Cadence.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,11 @@ builder.Services.AddDbContext<CadenceDbContext>((sp, options) =>
     options.UseSqlite($"Data Source={storagePaths.DatabasePath}")
            .AddInterceptors(interceptor);
 });
+
+// Configure Services
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<IMediaProcessingService, MediaProcessingService>();
+builder.Services.AddScoped<IPianoMentorService, PianoMentorService>();
 
 // Configure JSON serialization (Serialize Enums as strings)
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -43,5 +49,7 @@ using (var scope = app.Services.CreateScope())
 app.MapSystemEndpoints();
 app.MapTaskEndpoints();
 app.MapMusicalLibraryEndpoints();
+app.MapPianoMentorEndpoints();
+app.MapMediaStreamEndpoints();
 
 app.Run();

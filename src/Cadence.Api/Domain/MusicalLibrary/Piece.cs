@@ -1,3 +1,5 @@
+using Cadence.Api.Domain.PianoMentor;
+
 namespace Cadence.Api.Domain.MusicalLibrary;
 
 public class Piece
@@ -14,9 +16,15 @@ public class Piece
 
     public string InterpretationNotes { get; set; } = string.Empty;
 
+    public ScoreCapabilityTier ScoreCapabilityTier { get; set; } = ScoreCapabilityTier.None;
+
+    public string? ScoreFilePath { get; set; }
+
     public DateTimeOffset? LastPracticedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public List<PracticeSession> Sessions { get; set; } = [];
+
+    public List<PieceWeakness> Weaknesses { get; set; } = [];
 }

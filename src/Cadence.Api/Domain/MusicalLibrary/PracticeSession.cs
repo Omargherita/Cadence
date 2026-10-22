@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Cadence.Api.Domain.PianoMentor;
 
 namespace Cadence.Api.Domain.MusicalLibrary;
 
@@ -20,4 +21,6 @@ public class PracticeSession
     public string UserSelfReflection { get; set; } = string.Empty;
 
     public string NextSessionGoal { get; set; } = string.Empty;
+
+    public List<PracticeTake> Takes { get; set; } = [];
 }

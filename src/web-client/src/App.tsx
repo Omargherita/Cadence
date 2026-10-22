@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Header } from './components/Header';
 import { OrganizerView } from './features/organizer/OrganizerView';
 import { MusicalLibraryView } from './features/music/MusicalLibraryView';
@@ -11,10 +11,15 @@ import {
   TaskItem,
 } from './types/cadence';
 import { api } from './services/api';
+import { cadenceRepository } from './services/cadenceRepository';
+import { syncEngine, SyncEngineStatus } from './services/syncEngine';
 
 export function App() {
   const [activeView, setActiveView] = useState<'organizer' | 'library'>('organizer');
   const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const wasOffline = useRef(false);
 
   // Life Organizer State
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -29,20 +34,63 @@ export function App() {
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [isLoadingPieces, setIsLoadingPieces] = useState(false);
 
-  // Health check on mount and interval
+  // 1. Request persistent storage on app initialization
   useEffect(() => {
-    const checkConnection = async () => {
+    if (typeof navigator !== 'undefined' && 'storage' in navigator && 'persist' in navigator.storage) {
+      navigator.storage.persist().then((granted) => {
+        if (granted) {
+          console.log('[Cadence] Persistent storage granted by browser.');
+        }
+      }).catch((e) => console.debug('[Cadence] Storage persist error:', e));
+    }
+  }, []);
+
+  // 2. Subscribe to Sync Engine Status
+  useEffect(() => {
+    const unsubscribe = syncEngine.subscribe((status: SyncEngineStatus) => {
+      setPendingOutboxCount(status.pendingCount);
+      setIsSyncing(status.isSyncing);
+    });
+    return unsubscribe;
+  }, []);
+
+  // 3. Health & Auto-Replay Loop
+  useEffect(() => {
+    const checkConnectionAndReplay = async () => {
       try {
         await api.getHealth();
         setIsOnline(true);
+
+        // If transitioning from offline to online (or if there are pending items), process outbox
+        const pending = await syncEngine.getPendingCount();
+        if (wasOffline.current || pending > 0) {
+          wasOffline.current = false;
+          const result = await syncEngine.processOutbox();
+          if (result.processed > 0) {
+            await loadTasks();
+            await loadPieces();
+          }
+        }
       } catch {
         setIsOnline(false);
+        wasOffline.current = true;
       }
     };
 
-    checkConnection();
-    const interval = setInterval(checkConnection, 15000);
-    return () => clearInterval(interval);
+    checkConnectionAndReplay();
+    const interval = setInterval(checkConnectionAndReplay, 6000);
+
+    const handleWindowOnline = () => checkConnectionAndReplay();
+    const handleWindowOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleWindowOnline);
+    window.addEventListener('offline', handleWindowOffline);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleWindowOnline);
+      window.removeEventListener('offline', handleWindowOffline);
+    };
   }, []);
 
   // Persist archetype changes
@@ -51,11 +99,11 @@ export function App() {
     localStorage.setItem('cadence_archetype', archetype);
   };
 
-  // Load Tasks
+  // Load Tasks via Repository (Online or Offline Dexie Read-Through)
   const loadTasks = async () => {
     try {
       setIsLoadingTasks(true);
-      const data = await api.getTasks();
+      const data = await cadenceRepository.getTasks();
       setTasks(data);
     } catch (err) {
       console.error('Failed to load tasks', err);
@@ -64,11 +112,11 @@ export function App() {
     }
   };
 
-  // Load Pieces
+  // Load Pieces via Repository (Online or Offline Dexie Read-Through)
   const loadPieces = async () => {
     try {
       setIsLoadingPieces(true);
-      const data = await api.getPieces();
+      const data = await cadenceRepository.getPieces();
       setPieces(data);
     } catch (err) {
       console.error('Failed to load pieces', err);
@@ -82,37 +130,41 @@ export function App() {
     loadPieces();
   }, []);
 
+  // Manual Trigger for Outbox Synchronization
+  const handleSyncNow = async () => {
+    const result = await syncEngine.processOutbox();
+    if (result.processed > 0) {
+      await loadTasks();
+      await loadPieces();
+    }
+  };
+
   // Task Actions
   const handleAddTask = async (req: CreateTaskRequest) => {
-    const created = await api.createTask(req);
-    setTasks((prev) => [created, ...prev]);
-    // Refresh to get server-enforced sort order
+    const task = await cadenceRepository.createTask(req);
+    setTasks((prev) => [task, ...prev]);
     await loadTasks();
   };
 
   const handleToggleTask = async (id: string) => {
-    // Optimistic toggle
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, isCompleted: !t.isCompleted } : t))
     );
     try {
-      const updated = await api.toggleTask(id);
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? updated : t))
-      );
+      const updated = await cadenceRepository.toggleTask(id);
+      setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
       await loadTasks();
     } catch (err) {
-      // Revert if error
       await loadTasks();
       throw err;
     }
   };
 
   const handleDeleteTask = async (id: string) => {
-    // Optimistic delete
     setTasks((prev) => prev.filter((t) => t.id !== id));
     try {
-      await api.deleteTask(id);
+      await cadenceRepository.deleteTask(id);
+      await loadTasks();
     } catch (err) {
       await loadTasks();
       throw err;
@@ -121,7 +173,7 @@ export function App() {
 
   // Musical Piece Actions
   const handleCreatePiece = async (req: CreatePieceRequest) => {
-    const created = await api.createPiece(req);
+    const created = await cadenceRepository.createPiece(req);
     setPieces((prev) => [created, ...prev]);
     await loadPieces();
   };
@@ -130,15 +182,13 @@ export function App() {
     pieceId: string,
     req: CreatePracticeSessionRequest
   ) => {
-    await api.logPracticeSession(pieceId, req);
-    // Reload pieces to get updated LastPracticedAtUtc and new session in history
+    await cadenceRepository.logPracticeSession(pieceId, req);
     await loadPieces();
   };
 
   // Bridge action: Switching directly to Piano Workspace
   const handleSwitchToPiano = () => {
     setActiveView('library');
-    // If pieces exist in MainChallenge, optionally pre-select the primary one
     const mainPiece = pieces.find((p) => p.bucket === 'MainChallenge');
     if (mainPiece) {
       setSelectedPieceId(mainPiece.id);
@@ -154,10 +204,12 @@ export function App() {
         activeView={activeView}
         onSelectView={(v) => {
           setActiveView(v);
-          // If switching to library view via tab, show board
           if (v === 'library') setSelectedPieceId(null);
         }}
         isOnline={isOnline}
+        pendingOutboxCount={pendingOutboxCount}
+        isSyncing={isSyncing}
+        onSyncNow={handleSyncNow}
       />
 
       {/* Main Content Workspace */}

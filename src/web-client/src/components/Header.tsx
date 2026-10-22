@@ -1,14 +1,24 @@
 import { FC, useState } from 'react';
-import { Activity, CheckSquare, Music, ShieldCheck, Database } from 'lucide-react';
+import { Activity, CheckSquare, Music, ShieldCheck, Database, RefreshCw, CloudOff } from 'lucide-react';
 import { api } from '../services/api';
 
 interface HeaderProps {
   activeView: 'organizer' | 'library';
   onSelectView: (view: 'organizer' | 'library') => void;
   isOnline: boolean;
+  pendingOutboxCount: number;
+  isSyncing: boolean;
+  onSyncNow: () => Promise<void>;
 }
 
-export const Header: FC<HeaderProps> = ({ activeView, onSelectView, isOnline }) => {
+export const Header: FC<HeaderProps> = ({
+  activeView,
+  onSelectView,
+  isOnline,
+  pendingOutboxCount,
+  isSyncing,
+  onSyncNow,
+}) => {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
 
@@ -19,7 +29,7 @@ export const Header: FC<HeaderProps> = ({ activeView, onSelectView, isOnline }) 
       const filename = res.backupPath.split('/').pop();
       setBackupMessage(`Saved: ${filename}`);
       setTimeout(() => setBackupMessage(null), 4000);
-    } catch (err) {
+    } catch {
       setBackupMessage('Backup failed');
       setTimeout(() => setBackupMessage(null), 3000);
     } finally {
@@ -31,9 +41,9 @@ export const Header: FC<HeaderProps> = ({ activeView, onSelectView, isOnline }) 
     <header className="sticky top-0 z-30 border-b border-[#1E2638] bg-[#0B0E14]/90 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Brand Logo & Connection Indicator */}
+          {/* Brand Logo & Connection/Outbox Indicator */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/10">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/10 shrink-0">
               <Activity className="w-5 h-5" />
             </div>
             <div className="flex flex-col">
@@ -45,23 +55,49 @@ export const Header: FC<HeaderProps> = ({ activeView, onSelectView, isOnline }) 
               </span>
             </div>
 
-            {/* Connection Indicator: Steel Blue for Online, Slate for Offline */}
-            <div
-              className={`ml-3 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                isOnline
-                  ? 'bg-blue-950/60 text-blue-400 border-blue-800/60'
-                  : 'bg-slate-900 text-slate-400 border-slate-700/60'
-              }`}
-              title={isOnline ? 'Connected to local backend' : 'Backend offline'}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  isOnline ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'
+            {/* Connection Status & Outbox Indicator */}
+            <div className="hidden sm:flex items-center gap-2 ml-2">
+              {/* Primary Online/Offline Pill */}
+              <div
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                  isOnline
+                    ? 'bg-blue-950/60 text-blue-400 border-blue-800/60'
+                    : 'bg-slate-900 text-slate-400 border-slate-700/60'
                 }`}
-              />
-              <span className="text-[11px] font-mono tracking-tight">
-                {isOnline ? 'Online' : 'Offline'}
-              </span>
+                title={isOnline ? 'Connected to local backend' : 'Backend offline (Serving from Dexie IndexedDB)'}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isOnline ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'
+                  }`}
+                />
+                <span className="text-[11px] font-mono tracking-tight">
+                  {isOnline ? 'Online' : 'Offline'}
+                </span>
+              </div>
+
+              {/* Pending Outbox Queue Pill */}
+              {pendingOutboxCount > 0 && (
+                isOnline ? (
+                  <button
+                    onClick={onSyncNow}
+                    disabled={isSyncing}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 border border-blue-700/70 transition-all cursor-pointer shadow-sm"
+                    title="Click to sync outbox changes immediately"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-blue-400' : 'text-blue-400'}`} />
+                    <span>{isSyncing ? 'Syncing...' : `Sync Now (${pendingOutboxCount})`}</span>
+                  </button>
+                ) : (
+                  <div
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-950/60 text-amber-300 border border-amber-800/60"
+                    title="Offline mutations queued in Dexie IndexedDB"
+                  >
+                    <CloudOff className="w-3 h-3 text-amber-400" />
+                    <span>Offline — {pendingOutboxCount} queued</span>
+                  </div>
+                )
+              )}
             </div>
           </div>
 
@@ -110,6 +146,24 @@ export const Header: FC<HeaderProps> = ({ activeView, onSelectView, isOnline }) 
             </button>
           </div>
         </div>
+
+        {/* Mobile-only outbox warning bar */}
+        {pendingOutboxCount > 0 && (
+          <div className="sm:hidden pb-2 flex items-center justify-between text-xs font-mono">
+            <span className="text-amber-300">
+              {isOnline ? `${pendingOutboxCount} changes pending sync` : `Offline — ${pendingOutboxCount} queued`}
+            </span>
+            {isOnline && (
+              <button
+                onClick={onSyncNow}
+                disabled={isSyncing}
+                className="text-blue-400 underline font-semibold cursor-pointer"
+              >
+                {isSyncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

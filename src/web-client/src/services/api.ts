@@ -8,7 +8,7 @@ import {
   TaskItem,
 } from '../types/cadence';
 
-const BASE_URL = '/api';
+const BASE_URL = typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:5006/api';
 
 export const api = {
   async getHealth(): Promise<HealthStatus> {

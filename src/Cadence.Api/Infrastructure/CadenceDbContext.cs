@@ -102,6 +102,8 @@ public class CadenceDbContext : DbContext
             entity.HasKey(t => t.Id);
             entity.Property(t => t.TakeNumber)
                 .IsRequired();
+            entity.Property(t => t.ObjectiveDspMetricsJson)
+                .IsRequired(false);
             entity.Property(t => t.CreatedAtUtc)
                 .IsRequired();
 

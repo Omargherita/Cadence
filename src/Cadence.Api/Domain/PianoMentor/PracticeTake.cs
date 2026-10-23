@@ -34,6 +34,8 @@ public class PracticeTake
 
     public double? DurationSeconds { get; set; }
 
+    public string? ObjectiveDspMetricsJson { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public MentorAssessment? Assessment { get; set; }

@@ -25,6 +25,7 @@ builder.Services.AddDbContext<CadenceDbContext>((sp, options) =>
 // Configure Services
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IMediaProcessingService, MediaProcessingService>();
+builder.Services.AddSingleton<IAudioDspAnalyzer, PythonAudioDspAnalyzer>();
 builder.Services.AddScoped<IPianoMentorService, PianoMentorService>();
 
 // Configure JSON serialization (Serialize Enums as strings)
@@ -43,6 +44,15 @@ using (var scope = app.Services.CreateScope())
     await db.Database.EnsureCreatedAsync();
     await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
     await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
+
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE PracticeTakes ADD COLUMN ObjectiveDspMetricsJson TEXT;");
+    }
+    catch
+    {
+        // Ignored: Column already exists or table was just created
+    }
 }
 
 // Map Endpoints

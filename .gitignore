@@ -39,6 +39,13 @@ appsettings.*.local.json
 *.sqlite
 *.sqlite3
 
+# Python & Virtual Environments
+.venv/
+*/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
 # OS Files
 .DS_Store
 Thumbs.db

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <DotNetHostPath>/home/omar/.dotnet/dotnet</DotNetHostPath>
+    <EnvironmentVariables>
+      <DOTNET_ROOT>/home/omar/.dotnet</DOTNET_ROOT>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

@@ -170,6 +170,7 @@ export interface PracticeTake {
   originalMediaType: OriginalMediaType;
   sourceQuality: MediaSourceQuality;
   durationSeconds: number | null;
+  objectiveDspMetricsJson?: string | null;
   createdAtUtc: string;
   assessment: MentorAssessment | null;
 }

@@ -145,6 +145,7 @@ public static class PianoMentorEndpoints
             HttpRequest request,
             CadenceDbContext db,
             IMediaProcessingService mediaService,
+            IAudioDspAnalyzer dspAnalyzer,
             IPianoMentorService mentorService,
             CancellationToken ct) =>
         {
@@ -198,6 +199,10 @@ public static class PianoMentorEndpoints
                 stream,
                 ct);
 
+            // Execute Python DSP Audio Analysis on the extracted 24kHz MP3
+            var fullAudioPath = mediaService.GetFullPath(processedMedia.ExtractedAudioRelativePath);
+            var dspMetrics = await dspAnalyzer.AnalyzeAudioAsync(fullAudioPath, ct);
+
             var take = new PracticeTake
             {
                 Id = Guid.CreateVersion7(),
@@ -212,14 +217,15 @@ public static class PianoMentorEndpoints
                 ExtractedAudioRelativePath = processedMedia.ExtractedAudioRelativePath,
                 OriginalMediaType = processedMedia.OriginalMediaType,
                 SourceQuality = quality,
-                DurationSeconds = processedMedia.DurationSeconds,
+                DurationSeconds = processedMedia.DurationSeconds ?? (dspMetrics.DurationSeconds > 0 ? dspMetrics.DurationSeconds : null),
+                ObjectiveDspMetricsJson = dspMetrics.RawJson,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
 
             db.PracticeTakes.Add(take);
 
-            // Execute Mentor Assessment & Weakness State Machine
-            var assessment = await mentorService.AssessTakeAsync(piece, session, take, w => db.Weaknesses.Add(w), ct);
+            // Execute Mentor Assessment & Weakness State Machine with DSP evidence
+            var assessment = await mentorService.AssessTakeAsync(piece, session, take, dspMetrics, w => db.Weaknesses.Add(w), ct);
             take.Assessment = assessment;
 
             piece.LastPracticedAtUtc = take.CreatedAtUtc;

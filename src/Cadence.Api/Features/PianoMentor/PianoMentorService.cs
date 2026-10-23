@@ -37,6 +37,7 @@ public class PianoMentorService : IPianoMentorService
         Piece piece,
         PracticeSession session,
         PracticeTake take,
+        ObjectiveDspMetrics? dspMetrics = null,
         Action<PieceWeakness>? onWeaknessAdded = null,
         CancellationToken cancellationToken = default)
     {
@@ -51,18 +52,18 @@ public class PianoMentorService : IPianoMentorService
         {
             try
             {
-                assessment = await CallGeminiAsync(apiKey, piece, session, take, cancellationToken);
+                assessment = await CallGeminiAsync(apiKey, piece, session, take, dspMetrics, cancellationToken);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Live Gemini analysis failed or timed out. Falling back to local diagnostic pedagogy assessment.");
-                assessment = GenerateLocalPedagogyAssessment(piece, session, take);
+                assessment = GenerateLocalPedagogyAssessment(piece, session, take, dspMetrics);
             }
         }
         else
         {
             _logger.LogInformation("No GEMINI_API_KEY configured. Running in Local Diagnostic Mode.");
-            assessment = GenerateLocalPedagogyAssessment(piece, session, take);
+            assessment = GenerateLocalPedagogyAssessment(piece, session, take, dspMetrics);
         }
 
         // Apply C# Epistemic Post-Validation and Deterministic State Machine transitions
@@ -76,6 +77,7 @@ public class PianoMentorService : IPianoMentorService
         Piece piece,
         PracticeSession session,
         PracticeTake take,
+        ObjectiveDspMetrics? dspMetrics,
         CancellationToken cancellationToken)
     {
         var model = _configuration["Cadence:GeminiModel"] ?? "gemini-2.5-flash";
@@ -117,6 +119,14 @@ Core Epistemic Principles:
                 take.IncludeVideoPostureAnalysis,
                 MediaType = take.OriginalMediaType.ToString()
             },
+            ObjectiveDspEvidence = dspMetrics != null && dspMetrics.AnalyzerStatus == "Available" ? new
+            {
+                dspMetrics.EstimatedMeanBpm,
+                dspMetrics.TempoStabilityStdDevBpm,
+                dspMetrics.DetectedTempoAnomalies,
+                dspMetrics.DynamicRangeRmsDb,
+                dspMetrics.DynamicEnvelopeNotes
+            } : null,
             ActiveWeaknesses = piece.Weaknesses.Where(w => w.Status != WeaknessStatus.Resolved).Select(w => new
             {
                 w.Id,
@@ -199,7 +209,11 @@ Core Epistemic Principles:
         return parsed ?? throw new InvalidOperationException("Failed to deserialize MentorAssessment from Gemini.");
     }
 
-    private MentorAssessment GenerateLocalPedagogyAssessment(Piece piece, PracticeSession session, PracticeTake take)
+    private MentorAssessment GenerateLocalPedagogyAssessment(
+        Piece piece,
+        PracticeSession session,
+        PracticeTake take,
+        ObjectiveDspMetrics? dspMetrics)
     {
         var hasPreviousTakes = take.TakeNumber > 1;
         var previousTake = session.Takes
@@ -209,14 +223,60 @@ Core Epistemic Principles:
 
         var targetSection = string.IsNullOrWhiteSpace(take.TargetSection) ? "Selected Passage" : take.TargetSection;
 
+        var dspAvailable = dspMetrics != null && dspMetrics.AnalyzerStatus == "Available";
+        var meanBpm = dspAvailable ? dspMetrics!.EstimatedMeanBpm : 0.0;
+        var tempoDev = dspAvailable ? dspMetrics!.TempoStabilityStdDevBpm : 0.0;
+        var dynamicRangeDb = dspAvailable ? dspMetrics!.DynamicRangeRmsDb : 0.0;
+        var anomalies = dspAvailable ? dspMetrics!.DetectedTempoAnomalies : [];
+
+        var anomalyNotes = anomalies.Count > 0
+            ? string.Join("; ", anomalies.Select(a => $"{a.Type} tendency at {a.TimestampRange} ({a.LocalBpm:F1} BPM, {a.DeviationPercent:F1}%)"))
+            : "No severe tempo fluctuations (>8%) detected";
+
+        var dspFindingsSummary = dspAvailable
+            ? $"Duration: {(take.DurationSeconds.HasValue ? $"{take.DurationSeconds:F1}s" : $"{dspMetrics!.DurationSeconds:F1}s")}. " +
+              $"Estimated mean tempo: {meanBpm:F1} BPM (std dev: {tempoDev:F2} BPM). " +
+              $"Dynamic range contrast: {dynamicRangeDb:F1} dB. " +
+              $"Tempo stability: {anomalyNotes}. " +
+              $"{dspMetrics!.DynamicEnvelopeNotes}"
+            : $"Measured passage duration: {(take.DurationSeconds.HasValue ? $"{take.DurationSeconds:F1}s" : "N/A")}. Tempo consistency observed within ~4% tolerance.";
+
+        var critiqueBuilder = new StringBuilder();
+        critiqueBuilder.Append($"In \"{piece.Title}\" ({targetSection}), your rhythmic backbone is established");
+        if (dspAvailable && meanBpm > 0)
+        {
+            critiqueBuilder.Append($" around {meanBpm:F0} BPM (tempo stability ±{tempoDev:F1} BPM)");
+        }
+        critiqueBuilder.Append(", but the emotional trajectory demands far greater dynamic hierarchy. ");
+
+        if (anomalies.Count > 0)
+        {
+            var firstAnomaly = anomalies[0];
+            critiqueBuilder.Append($"Noticeable {firstAnomaly.Type.ToLowerInvariant()} tendency flagged at {firstAnomaly.TimestampRange} ({firstAnomaly.LocalBpm:F0} BPM vs {meanBpm:F0} BPM baseline). ");
+        }
+
+        if (dspAvailable && dynamicRangeDb > 0)
+        {
+            if (dynamicRangeDb < 12.0)
+            {
+                critiqueBuilder.Append($"The measured acoustic dynamic contrast is narrow ({dynamicRangeDb:F1} dB); avoid flattening emotional climaxes into a uniform mezzo-forte. ");
+            }
+            else
+            {
+                critiqueBuilder.Append($"The measured acoustic dynamic contrast is expressive ({dynamicRangeDb:F1} dB headroom); maintain this clarity of projection. ");
+            }
+        }
+
+        critiqueBuilder.Append("Listen to the soprano voice as an operatic soloist: it must rise above the accompaniment with warmth and breath, rather than percussive velocity. " +
+                               "Release unnecessary shoulder and forearm tension during transition points so that phrasing breathes naturally.");
+
         var assessment = new MentorAssessment
         {
             SchemaVersion = "1.1.0",
-            MentorCritique = $"[Local Diagnostic Mode — Set GEMINI_API_KEY for live multimodal analysis] " +
-                             $"In \"{piece.Title}\" ({targetSection}), your rhythmic backbone is established, but the emotional trajectory demands far greater dynamic hierarchy. " +
-                             $"Listen to the soprano voice as an operatic soloist: it must rise above the accompaniment with warmth and breath, rather than percussive velocity. " +
-                             $"Release unnecessary shoulder and forearm tension during the transition points so that phrasing breathes naturally.",
-            AnalysisLimitationsNote = "Assessment generated via local deterministic master pedagogue heuristics. Add GEMINI_API_KEY for deep audio-first spectral analysis.",
+            MentorCritique = $"[Local Diagnostic Mode — Set GEMINI_API_KEY for live multimodal analysis] {critiqueBuilder}",
+            AnalysisLimitationsNote = dspAvailable
+                ? "Assessment powered by deterministic Python DSP audio metrics & local pedagogue heuristics. Set GEMINI_API_KEY for neural multimodal critique."
+                : "Assessment generated via local deterministic master pedagogue heuristics. Add GEMINI_API_KEY for deep audio-first spectral analysis.",
             IntraSessionComparison = new IntraSessionComparison
             {
                 ComparedAgainstTakeNumber = previousTake?.TakeNumber,
@@ -227,7 +287,7 @@ Core Epistemic Principles:
             },
             EvidenceBreakdown = new EvidenceBreakdown
             {
-                ObjectiveFindingsSummary = $"Measured passage duration: {(take.DurationSeconds.HasValue ? $"{take.DurationSeconds:F1}s" : "N/A")}. Tempo consistency observed within ~4% tolerance.",
+                ObjectiveFindingsSummary = dspFindingsSummary,
                 ArtisticAndInterpretiveJudgment = "The phrasing demonstrates musical intent, but subtle micro-accents in the secondary voice disrupt the long cantabile line."
             },
             DiagnosticQuestionsForStudent =

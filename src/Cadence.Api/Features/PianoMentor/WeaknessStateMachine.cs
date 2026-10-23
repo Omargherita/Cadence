@@ -17,17 +17,14 @@ public static class WeaknessStateMachine
         Action<PieceWeakness>? onWeaknessAdded = null)
     {
         // 1. Epistemic Post-Validation Guardrails
+        // Disallow and strip video posture claims if video posture analysis was not requested or original media is audio
+        if (!take.IncludeVideoPostureAnalysis || take.OriginalMediaType == OriginalMediaType.AudioMp3)
+        {
+            assessment.NewlyDetectedIssues.RemoveAll(i => i.EvidenceSource == EvidenceSource.VideoPosture);
+        }
+
         foreach (var issue in assessment.NewlyDetectedIssues)
         {
-            // Disallow video posture claims if video posture analysis was not requested or original media is audio
-            if (!take.IncludeVideoPostureAnalysis || take.OriginalMediaType == OriginalMediaType.AudioMp3)
-            {
-                if (issue.EvidenceSource == EvidenceSource.VideoPosture)
-                {
-                    issue.EvidenceSource = EvidenceSource.AudioPerceptual;
-                }
-            }
-
             // Low confidence issues MUST NEVER be promoted to tracked weaknesses
             if (issue.ConfidenceLevel == ConfidenceLevel.Low)
             {

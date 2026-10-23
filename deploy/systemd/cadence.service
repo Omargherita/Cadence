@@ -1,0 +1,21 @@
+[Unit]
+Description=Cadence - Personal Life & Repertoire Studio (ASP.NET Core Single-Port Host)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Development/Projects/Cadence
+ExecStart=%h/Development/Projects/Cadence/deploy/publish/Cadence.Api --urls http://0.0.0.0:5006
+Restart=on-failure
+RestartSec=5s
+
+Environment=DOTNET_ROOT=%h/.dotnet
+Environment=PATH=%h/.dotnet:/usr/local/bin:/usr/bin:/bin
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5006
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

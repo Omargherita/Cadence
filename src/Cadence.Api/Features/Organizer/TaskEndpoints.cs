@@ -31,6 +31,7 @@ public static class TaskEndpoints
                     t.Category,
                     t.Priority,
                     t.ScheduledDate,
+                    t.Recurrence,
                     t.IsCompleted,
                     t.CompletedAtUtc,
                     t.UpdatedAtUtc
@@ -68,6 +69,7 @@ public static class TaskEndpoints
                 Title = request.Title.Trim(),
                 Category = request.Category,
                 Priority = priority,
+                Recurrence = request.Recurrence,
                 ScheduledDate = request.ScheduledDate,
                 IsCompleted = false,
                 CompletedAtUtc = null,
@@ -83,6 +85,7 @@ public static class TaskEndpoints
                 task.Category,
                 task.Priority,
                 task.ScheduledDate,
+                task.Recurrence,
                 task.IsCompleted,
                 task.CompletedAtUtc,
                 task.UpdatedAtUtc
@@ -103,6 +106,41 @@ public static class TaskEndpoints
             task.CompletedAtUtc = task.IsCompleted ? DateTimeOffset.UtcNow : null;
             task.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
+            // When completing a recurring task, schedule the next occurrence
+            if (task.IsCompleted && task.Recurrence != RecurrencePattern.None)
+            {
+                var baseDate = task.ScheduledDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+                var nextDate = task.Recurrence switch
+                {
+                    RecurrencePattern.Daily => baseDate.AddDays(1),
+                    RecurrencePattern.Weekdays => GetNextWeekday(baseDate),
+                    RecurrencePattern.Weekly => baseDate.AddDays(7),
+                    _ => baseDate
+                };
+
+                var alreadyExists = await db.Tasks.AnyAsync(t =>
+                    t.Title == task.Title &&
+                    t.ScheduledDate == nextDate &&
+                    !t.IsCompleted);
+
+                if (!alreadyExists)
+                {
+                    var nextTask = new TaskItem
+                    {
+                        Id = Guid.CreateVersion7(),
+                        Title = task.Title,
+                        Category = task.Category,
+                        Priority = task.Priority,
+                        Recurrence = task.Recurrence,
+                        ScheduledDate = nextDate,
+                        IsCompleted = false,
+                        CompletedAtUtc = null,
+                        UpdatedAtUtc = DateTimeOffset.UtcNow
+                    };
+                    db.Tasks.Add(nextTask);
+                }
+            }
+
             await db.SaveChangesAsync();
 
             var response = new TaskResponse(
@@ -111,6 +149,7 @@ public static class TaskEndpoints
                 task.Category,
                 task.Priority,
                 task.ScheduledDate,
+                task.Recurrence,
                 task.IsCompleted,
                 task.CompletedAtUtc,
                 task.UpdatedAtUtc
@@ -134,5 +173,15 @@ public static class TaskEndpoints
         });
 
         return group;
+    }
+
+    private static DateOnly GetNextWeekday(DateOnly current)
+    {
+        var next = current.AddDays(1);
+        while (next.DayOfWeek == DayOfWeek.Saturday || next.DayOfWeek == DayOfWeek.Sunday)
+        {
+            next = next.AddDays(1);
+        }
+        return next;
     }
 }

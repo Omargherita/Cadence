@@ -6,7 +6,21 @@ using Cadence.Api.Features.System;
 using Cadence.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args);
+var baseDir = AppContext.BaseDirectory;
+var candidateWebRoots = new[]
+{
+    Path.Combine(baseDir, "wwwroot"),
+    Path.Combine(Directory.GetCurrentDirectory(), "src", "Cadence.Api", "wwwroot"),
+    Path.Combine(Directory.GetCurrentDirectory(), "deploy", "publish", "wwwroot"),
+    Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")
+};
+var resolvedWebRoot = candidateWebRoots.FirstOrDefault(Directory.Exists);
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = resolvedWebRoot
+});
 
 // Configure Storage Paths and Directories
 var storagePaths = new CadenceStoragePaths();
@@ -53,7 +67,20 @@ using (var scope = app.Services.CreateScope())
     {
         // Ignored: Column already exists or table was just created
     }
+
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks ADD COLUMN Recurrence TEXT;");
+    }
+    catch
+    {
+        // Ignored: Column already exists or table was just created
+    }
 }
+
+// Enable Serving Compiled Frontend (PWA)
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 // Map Endpoints
 app.MapSystemEndpoints();
@@ -61,5 +88,8 @@ app.MapTaskEndpoints();
 app.MapMusicalLibraryEndpoints();
 app.MapPianoMentorEndpoints();
 app.MapMediaStreamEndpoints();
+
+// Fallback to React PWA SPA index.html for client-side routing
+app.MapFallbackToFile("index.html");
 
 app.Run();

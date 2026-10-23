@@ -1,6 +1,6 @@
 import React, { FC, useState } from 'react';
-import { Plus, Calendar as CalendarIcon, Tag, Flame } from 'lucide-react';
-import { CreateTaskRequest, TaskCategory } from '../../types/cadence';
+import { Plus, Calendar as CalendarIcon, Tag, Flame, Repeat } from 'lucide-react';
+import { CreateTaskRequest, RecurrencePattern, TaskCategory } from '../../types/cadence';
 import { getTodayIsoDate } from '../../utils/date';
 
 interface TaskEntryProps {
@@ -21,10 +21,18 @@ const PRIORITIES = [
   { value: 3, label: 'P3 Low', color: 'text-slate-400 border-slate-700/60 bg-slate-800/40' },
 ];
 
+const RECURRENCE_OPTIONS: { value: RecurrencePattern; label: string }[] = [
+  { value: 'None', label: 'Once' },
+  { value: 'Daily', label: 'Daily' },
+  { value: 'Weekdays', label: 'Weekdays' },
+  { value: 'Weekly', label: 'Weekly' },
+];
+
 export const TaskEntry: FC<TaskEntryProps> = ({ onAddTask }) => {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<TaskCategory>('DeepWork');
   const [priority, setPriority] = useState<number>(2);
+  const [recurrence, setRecurrence] = useState<RecurrencePattern>('None');
   const [isScheduledForToday, setIsScheduledForToday] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -38,9 +46,11 @@ export const TaskEntry: FC<TaskEntryProps> = ({ onAddTask }) => {
         title: title.trim(),
         category,
         priority,
+        recurrence,
         scheduledDate: isScheduledForToday ? getTodayIsoDate() : null,
       });
       setTitle('');
+      setRecurrence('None');
     } finally {
       setIsSubmitting(false);
     }
@@ -101,7 +111,7 @@ export const TaskEntry: FC<TaskEntryProps> = ({ onAddTask }) => {
           })}
         </div>
 
-        {/* Priority & Date Quick Toggle */}
+        {/* Priority, Recurrence & Date Quick Toggle */}
         <div className="flex items-center gap-3 flex-wrap">
           {/* Priority */}
           <div className="flex items-center gap-1">
@@ -121,6 +131,30 @@ export const TaskEntry: FC<TaskEntryProps> = ({ onAddTask }) => {
                     }`}
                   >
                     {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Recurrence */}
+          <div className="flex items-center gap-1">
+            <Repeat className="w-3 h-3 text-violet-400" />
+            <div className="flex items-center gap-1">
+              {RECURRENCE_OPTIONS.map((r) => {
+                const isSelected = recurrence === r.value;
+                return (
+                  <button
+                    key={r.value}
+                    type="button"
+                    onClick={() => setRecurrence(r.value)}
+                    className={`px-2 py-0.5 rounded-md border text-[11px] font-mono font-medium transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-violet-950/60 text-violet-300 border-violet-800/80 font-bold ring-1 ring-violet-500/30'
+                        : 'bg-[#0B0E14] text-slate-400 border-[#1E2638] hover:bg-[#1A202C]'
+                    }`}
+                  >
+                    {r.label}
                   </button>
                 );
               })}

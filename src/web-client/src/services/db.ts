@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import { Piece, TaskItem } from '../types/cadence';
+import { PendingTake, Piece, TaskItem } from '../types/cadence';
 
 export type MutationOperation =
   | 'CREATE_TASK'
@@ -21,6 +21,7 @@ export class CadenceLocalDb extends Dexie {
   tasks!: Table<TaskItem, string>;
   pieces!: Table<Piece, string>;
   syncOutbox!: Table<OutboxItem, string>;
+  pendingTakesOutbox!: Table<PendingTake, string>;
 
   constructor() {
     super('CadenceLocalDb');
@@ -28,6 +29,13 @@ export class CadenceLocalDb extends Dexie {
       tasks: 'id, scheduledDate, isCompleted, priority, updatedAtUtc',
       pieces: 'id, bucket, lastPracticedAtUtc, updatedAtUtc',
       syncOutbox: 'id, timestampUtc, operationType',
+    });
+
+    this.version(2).stores({
+      tasks: 'id, scheduledDate, isCompleted, priority, updatedAtUtc',
+      pieces: 'id, bucket, lastPracticedAtUtc, updatedAtUtc',
+      syncOutbox: 'id, timestampUtc, operationType',
+      pendingTakesOutbox: 'id, pieceId, sessionId, createdAtUtc',
     });
   }
 }

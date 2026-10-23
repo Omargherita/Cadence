@@ -7,7 +7,8 @@ public record CreateTaskRequest(
     string Title,
     TaskCategory Category,
     int? Priority,
-    DateOnly? ScheduledDate
+    DateOnly? ScheduledDate,
+    RecurrencePattern Recurrence = RecurrencePattern.None
 );
 
 public record TaskResponse(
@@ -16,6 +17,7 @@ public record TaskResponse(
     TaskCategory Category,
     int Priority,
     DateOnly? ScheduledDate,
+    RecurrencePattern Recurrence,
     bool IsCompleted,
     DateTimeOffset? CompletedAtUtc,
     DateTimeOffset UpdatedAtUtc

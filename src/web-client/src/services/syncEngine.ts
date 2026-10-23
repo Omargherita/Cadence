@@ -23,7 +23,10 @@ export class SyncEngine {
   }
 
   private async notify() {
-    const pendingCount = await db.syncOutbox.count();
+    const pendingMutations = await db.syncOutbox.count();
+    const pendingTakes = await db.pendingTakesOutbox.count();
+    const pendingCount = pendingMutations + pendingTakes;
+
     const status: SyncEngineStatus = {
       isSyncing: this.isSyncing,
       pendingCount,
@@ -36,7 +39,9 @@ export class SyncEngine {
   }
 
   public async getPendingCount(): Promise<number> {
-    return db.syncOutbox.count();
+    const pendingMutations = await db.syncOutbox.count();
+    const pendingTakes = await db.pendingTakesOutbox.count();
+    return pendingMutations + pendingTakes;
   }
 
   /**
@@ -44,7 +49,7 @@ export class SyncEngine {
    */
   public async processOutbox(): Promise<{ processed: number; remaining: number }> {
     if (this.isSyncing) {
-      return { processed: 0, remaining: await db.syncOutbox.count() };
+      return { processed: 0, remaining: await this.getPendingCount() };
     }
 
     try {
@@ -59,7 +64,7 @@ export class SyncEngine {
         // Backend not reachable, abort replay quietly
         this.isSyncing = false;
         await this.notify();
-        return { processed: 0, remaining: await db.syncOutbox.count() };
+        return { processed: 0, remaining: await this.getPendingCount() };
       }
 
       const items = await db.syncOutbox.orderBy('timestampUtc').toArray();
@@ -79,6 +84,31 @@ export class SyncEngine {
         }
       }
 
+      // Replay pending offline practice takes
+      const pendingTakes = await db.pendingTakesOutbox.orderBy('createdAtUtc').toArray();
+      for (const take of pendingTakes) {
+        try {
+          const formData = new FormData();
+          const file = new File([take.mediaBlob], take.originalFileName, { type: take.mimeType });
+          formData.append('file', file);
+          formData.append('scope', take.scope);
+          formData.append('targetSection', take.targetSection);
+          formData.append('userSelfReflection', take.userSelfReflection);
+          formData.append('attachedPdfPages', take.attachedPdfPages);
+          formData.append('includeVideoPostureAnalysis', take.includeVideoPostureAnalysis ? 'true' : 'false');
+          formData.append('sourceQuality', 'PhoneMicCompressed');
+
+          await api.uploadTake(take.pieceId, take.sessionId, formData);
+          await db.pendingTakesOutbox.delete(take.id);
+          processedCount++;
+          await this.notify();
+        } catch (takeErr: any) {
+          console.warn(`Failed to replay pending take ${take.id}:`, takeErr);
+          this.lastError = takeErr?.message || 'Take sync failed';
+          break;
+        }
+      }
+
       if (processedCount > 0) {
         this.lastSyncedAtUtc = new Date().toISOString();
         // Refresh local read caches from server
@@ -87,7 +117,7 @@ export class SyncEngine {
 
       return {
         processed: processedCount,
-        remaining: await db.syncOutbox.count(),
+        remaining: await this.getPendingCount(),
       };
     } finally {
       this.isSyncing = false;

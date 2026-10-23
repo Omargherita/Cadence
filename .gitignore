@@ -49,3 +49,7 @@ __pycache__/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Deployment & Build Outputs
+deploy/publish/
+src/Cadence.Api/wwwroot/

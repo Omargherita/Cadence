@@ -10,6 +10,8 @@ public class TaskItem
 
     public int Priority { get; set; } = 2;
 
+    public RecurrencePattern Recurrence { get; set; } = RecurrencePattern.None;
+
     public DateOnly? ScheduledDate { get; set; }
 
     public bool IsCompleted { get; set; }

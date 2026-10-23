@@ -2,6 +2,7 @@ import {
   CreatePieceRequest,
   CreatePracticeSessionRequest,
   CreateTaskRequest,
+  PendingTake,
   Piece,
   PracticeSession,
   TaskItem,
@@ -60,6 +61,7 @@ export const cadenceRepository = {
       title: req.title,
       category: req.category,
       priority: req.priority ?? 2,
+      recurrence: req.recurrence || 'None',
       scheduledDate: req.scheduledDate ?? null,
       isCompleted: false,
       completedAtUtc: null,
@@ -106,6 +108,42 @@ export const cadenceRepository = {
       existing.completedAtUtc = existing.isCompleted ? now : null;
       existing.updatedAtUtc = now;
       await db.tasks.put(existing);
+
+      // If task was completed and is recurring, optimistically schedule next occurrence
+      if (existing.isCompleted && existing.recurrence && existing.recurrence !== 'None') {
+        const baseDate = existing.scheduledDate ? new Date(existing.scheduledDate) : new Date();
+        const nextDate = new Date(baseDate);
+        if (existing.recurrence === 'Daily') {
+          nextDate.setDate(nextDate.getDate() + 1);
+        } else if (existing.recurrence === 'Weekdays') {
+          nextDate.setDate(nextDate.getDate() + 1);
+          while (nextDate.getDay() === 0 || nextDate.getDay() === 6) {
+            nextDate.setDate(nextDate.getDate() + 1);
+          }
+        } else if (existing.recurrence === 'Weekly') {
+          nextDate.setDate(nextDate.getDate() + 7);
+        }
+        const nextDateStr = nextDate.toISOString().split('T')[0];
+
+        const alreadyExists = await db.tasks
+          .filter((t) => t.title === existing.title && t.scheduledDate === nextDateStr && !t.isCompleted)
+          .first();
+
+        if (!alreadyExists) {
+          const spawnedTask: TaskItem = {
+            id: crypto.randomUUID(),
+            title: existing.title,
+            category: existing.category,
+            priority: existing.priority,
+            recurrence: existing.recurrence,
+            scheduledDate: nextDateStr,
+            isCompleted: false,
+            completedAtUtc: null,
+            updatedAtUtc: now,
+          };
+          await db.tasks.put(spawnedTask);
+        }
+      }
     }
 
     const pendingCount = await syncEngine.getPendingCount();
@@ -285,5 +323,33 @@ export const cadenceRepository = {
     });
 
     return localSession;
+  },
+
+  /**
+   * Queues an audio/video take offline in IndexedDB for later replay when backend is reachable.
+   */
+  async queueOfflineTake(pendingTake: PendingTake): Promise<void> {
+    await db.pendingTakesOutbox.put(pendingTake);
+  },
+
+  /**
+   * Retrieves pending offline takes, optionally filtered by pieceId or sessionId.
+   */
+  async getPendingTakes(pieceId?: string, sessionId?: string): Promise<PendingTake[]> {
+    let takes = await db.pendingTakesOutbox.toArray();
+    if (pieceId) {
+      takes = takes.filter((t) => t.pieceId === pieceId);
+    }
+    if (sessionId) {
+      takes = takes.filter((t) => t.sessionId === sessionId);
+    }
+    return takes.sort((a, b) => new Date(b.createdAtUtc).getTime() - new Date(a.createdAtUtc).getTime());
+  },
+
+  /**
+   * Removes a pending take from the outbox.
+   */
+  async deletePendingTake(id: string): Promise<void> {
+    await db.pendingTakesOutbox.delete(id);
   },
 };

@@ -1,5 +1,5 @@
 import { FC } from 'react';
-import { Check, Trash2, ChevronRight, Music, Clock } from 'lucide-react';
+import { Check, Trash2, ChevronRight, Music, Clock, Repeat } from 'lucide-react';
 import { TaskCategory, TaskItem } from '../../types/cadence';
 import { formatRelativeTime } from '../../utils/date';
 
@@ -85,6 +85,14 @@ export const TaskItemCard: FC<TaskItemCardProps> = ({
             >
               {prio.label}
             </span>
+
+            {/* Recurrence Badge */}
+            {task.recurrence && task.recurrence !== 'None' && (
+              <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-mono text-violet-300 bg-violet-950/40 border-violet-800/60 flex items-center gap-1">
+                <Repeat className="w-2.5 h-2.5 text-violet-400" />
+                <span>{task.recurrence}</span>
+              </span>
+            )}
 
             {/* Schedule/Completion Info */}
             <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">

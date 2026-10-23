@@ -175,11 +175,29 @@ export interface PracticeTake {
   assessment: MentorAssessment | null;
 }
 
+export type RecurrencePattern = 'None' | 'Daily' | 'Weekdays' | 'Weekly';
+
+export interface PendingTake {
+  id: string;
+  pieceId: string;
+  sessionId: string;
+  scope: TakeScope;
+  targetSection: string;
+  userSelfReflection: string;
+  attachedPdfPages: string;
+  includeVideoPostureAnalysis: boolean;
+  mediaBlob: Blob;
+  originalFileName: string;
+  mimeType: string;
+  createdAtUtc: string;
+}
+
 export interface TaskItem {
   id: string;
   title: string;
   category: TaskCategory;
   priority: number;
+  recurrence?: RecurrencePattern;
   scheduledDate: string | null;
   isCompleted: boolean;
   completedAtUtc: string | null;
@@ -191,6 +209,7 @@ export interface CreateTaskRequest {
   title: string;
   category: TaskCategory;
   priority?: number;
+  recurrence?: RecurrencePattern;
   scheduledDate?: string | null;
 }
 

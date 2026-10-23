@@ -1,0 +1,9 @@
+[Unit]
+Description=Cadence - SQLite Hot Database Backup Service
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/Development/Projects/Cadence/deploy/backup-db.sh
+StandardOutput=journal
+StandardError=journal

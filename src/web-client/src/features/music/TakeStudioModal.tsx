@@ -11,12 +11,21 @@ import {
 } from 'lucide-react';
 import { TakeScope } from '../../types/cadence';
 
+export interface TakeUploadMetadata {
+  file: File;
+  scope: TakeScope;
+  targetSection: string;
+  userSelfReflection: string;
+  attachedPdfPages: string;
+  includeVideoPostureAnalysis: boolean;
+}
+
 interface TakeStudioModalProps {
   isOpen: boolean;
   onClose: () => void;
   pieceTitle: string;
   defaultTargetSection?: string;
-  onUploadTake: (formData: FormData) => Promise<void>;
+  onUploadTake: (formData: FormData, metadata: TakeUploadMetadata) => Promise<void>;
 }
 
 export const TakeStudioModal: FC<TakeStudioModalProps> = ({
@@ -65,7 +74,14 @@ export const TakeStudioModal: FC<TakeStudioModalProps> = ({
       formData.append('includeVideoPostureAnalysis', includeVideoPosture ? 'true' : 'false');
       formData.append('sourceQuality', 'PhoneMicCompressed');
 
-      await onUploadTake(formData);
+      await onUploadTake(formData, {
+        file,
+        scope,
+        targetSection: targetSection.trim(),
+        userSelfReflection: selfReflection.trim(),
+        attachedPdfPages: attachedPdfPages.trim(),
+        includeVideoPostureAnalysis: includeVideoPosture,
+      });
       onClose();
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to analyze take');

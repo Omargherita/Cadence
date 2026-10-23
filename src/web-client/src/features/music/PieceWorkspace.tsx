@@ -13,22 +13,26 @@ import {
   Radio,
   Sparkles,
   Target,
+  Trash2,
   Upload,
   Zap,
 } from 'lucide-react';
 import {
   CreatePracticeSessionRequest,
   CreateWeaknessRequest,
+  PendingTake,
   Piece,
   PieceWeakness,
   PracticeTake,
   RepertoireBucket,
 } from '../../types/cadence';
 import { api } from '../../services/api';
+import { cadenceRepository } from '../../services/cadenceRepository';
+import { syncEngine } from '../../services/syncEngine';
 import { formatDateTime, formatRelativeTime } from '../../utils/date';
 import { ScoreViewerModal } from './ScoreViewerModal';
 import { WeaknessTrackerPanel } from './WeaknessTrackerPanel';
-import { TakeStudioModal } from './TakeStudioModal';
+import { TakeStudioModal, TakeUploadMetadata } from './TakeStudioModal';
 import { TakePlayerCard } from './TakePlayerCard';
 
 interface PieceWorkspaceProps {
@@ -77,6 +81,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     piece.sessions.length > 0 ? piece.sessions[0].id : null
   );
   const [sessionTakes, setSessionTakes] = useState<PracticeTake[]>([]);
+  const [pendingTakes, setPendingTakes] = useState<PendingTake[]>([]);
   const [isLoadingTakes, setIsLoadingTakes] = useState(false);
 
   // Log Practice Session Form State
@@ -109,14 +114,29 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     }
   }, [piece.sessions, selectedSessionId]);
 
-  // Load takes for selected session
+  // Load takes & pending offline takes for selected session
   useEffect(() => {
     if (selectedSessionId) {
       loadTakesForSession(selectedSessionId);
+      loadPendingTakes();
     } else {
       setSessionTakes([]);
+      setPendingTakes([]);
     }
-  }, [selectedSessionId]);
+  }, [selectedSessionId, piece.id]);
+
+  // Subscribe to sync engine status to auto-refresh takes when background sync drains pending queue
+  useEffect(() => {
+    const unsubscribe = syncEngine.subscribe((status) => {
+      if (!status.isSyncing) {
+        loadPendingTakes();
+        if (selectedSessionId) {
+          loadTakesForSession(selectedSessionId);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [piece.id, selectedSessionId]);
 
   const loadWeaknesses = async () => {
     try {
@@ -125,6 +145,15 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     } catch (err) {
       console.error('Failed to load weaknesses', err);
     }
+  };
+
+  const loadPendingTakes = async () => {
+    if (!selectedSessionId) {
+      setPendingTakes([]);
+      return;
+    }
+    const takes = await cadenceRepository.getPendingTakes(piece.id, selectedSessionId);
+    setPendingTakes(takes);
   };
 
   const loadTakesForSession = async (sessionId: string) => {
@@ -168,12 +197,38 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     if (onRefresh) await onRefresh();
   };
 
-  const handleUploadTake = async (formData: FormData) => {
+  const handleUploadTake = async (formData: FormData, metadata: TakeUploadMetadata) => {
     if (!selectedSessionId) return;
-    await api.uploadTake(piece.id, selectedSessionId, formData);
-    await loadTakesForSession(selectedSessionId);
-    await loadWeaknesses();
-    if (onRefresh) await onRefresh();
+
+    try {
+      await api.uploadTake(piece.id, selectedSessionId, formData);
+      await loadTakesForSession(selectedSessionId);
+      await loadWeaknesses();
+      if (onRefresh) await onRefresh();
+    } catch (err: any) {
+      console.warn('Network upload failed, queueing take offline in IndexedDB', err);
+      const pendingTake: PendingTake = {
+        id: crypto.randomUUID(),
+        pieceId: piece.id,
+        sessionId: selectedSessionId,
+        scope: metadata.scope,
+        targetSection: metadata.targetSection,
+        userSelfReflection: metadata.userSelfReflection,
+        attachedPdfPages: metadata.attachedPdfPages,
+        includeVideoPostureAnalysis: metadata.includeVideoPostureAnalysis,
+        mediaBlob: metadata.file,
+        originalFileName: metadata.file.name,
+        mimeType: metadata.file.type || (metadata.file.name.endsWith('.mp4') ? 'video/mp4' : 'audio/mp3'),
+        createdAtUtc: new Date().toISOString(),
+      };
+      await cadenceRepository.queueOfflineTake(pendingTake);
+      await loadPendingTakes();
+    }
+  };
+
+  const handleDeletePendingTake = async (id: string) => {
+    await cadenceRepository.deletePendingTake(id);
+    await loadPendingTakes();
   };
 
   const handleSubmitSession = async (e: React.FormEvent) => {
@@ -417,7 +472,9 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
               <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
                 {piece.sessions.map((session) => {
                   const isSelected = session.id === selectedSessionId;
-                  const takeCount = session.takes?.length || (isSelected ? sessionTakes.length : 0);
+                  const takeCount =
+                    (session.takes?.length || (isSelected ? sessionTakes.length : 0)) +
+                    (isSelected ? pendingTakes.length : 0);
 
                   return (
                     <button
@@ -469,7 +526,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white shrink-0 cursor-pointer shadow-sm shadow-violet-600/30"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Take #{sessionTakes.length + 1}</span>
+                  <span>Add Take #{sessionTakes.length + pendingTakes.length + 1}</span>
                 </button>
               </div>
             )}
@@ -479,31 +536,116 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
               <div className="p-8 text-center text-xs font-mono text-slate-400">
                 Loading practice takes...
               </div>
-            ) : sessionTakes.length > 0 ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between px-1">
-                  <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Radio className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Session Takes ({sessionTakes.length})</span>
-                  </h4>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    Latest take evaluated first
-                  </span>
-                </div>
+            ) : (sessionTakes.length > 0 || pendingTakes.length > 0) ? (
+              <div className="space-y-5">
+                {/* 1. Pending Offline Takes */}
+                {pendingTakes.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between px-1">
+                      <h4 className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Offline Queued Takes ({pendingTakes.length})</span>
+                      </h4>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        Awaiting Host Connection
+                      </span>
+                    </div>
 
-                <div className="space-y-4">
-                  {sessionTakes
-                    .slice()
-                    .reverse()
-                    .map((take, idx) => (
-                      <TakePlayerCard
+                    {pendingTakes.map((take) => (
+                      <div
                         key={take.id}
-                        take={take}
-                        weaknesses={weaknesses}
-                        isLatest={idx === 0}
-                      />
+                        className="rounded-2xl bg-[#141A29] border border-amber-800/60 p-4 space-y-3 shadow-lg shadow-black/40"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#1E2638]">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-950/60 text-amber-300 border border-amber-800/70 flex items-center gap-1.5 animate-pulse">
+                              <Radio className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Queued for Maestro Analysis (Waiting for Host)</span>
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-violet-950/40 text-violet-300 border border-violet-800/50">
+                              {take.scope}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-mono text-slate-400">
+                              {formatDateTime(take.createdAtUtc)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePendingTake(take.id)}
+                              className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-[#1A202C] transition-colors cursor-pointer"
+                              title="Discard queued take"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
+                              Media File
+                            </span>
+                            <span className="text-[#F0F4F8] font-mono text-[11px] truncate block">
+                              {take.originalFileName} ({(take.mediaBlob.size / (1024 * 1024)).toFixed(2)} MB)
+                            </span>
+                          </div>
+                          {take.targetSection && (
+                            <div>
+                              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
+                                Target Section
+                              </span>
+                              <span className="text-slate-200 text-xs">
+                                {take.targetSection}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {take.userSelfReflection && (
+                          <p className="text-xs text-slate-300 bg-[#0B0E14] rounded-lg p-2.5 border border-[#1E2638]">
+                            "{take.userSelfReflection}"
+                          </p>
+                        )}
+
+                        <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
+                          <Upload className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Stored safely in Dexie. Will upload and trigger Maestro assessment when backend is reached.</span>
+                        </div>
+                      </div>
                     ))}
-                </div>
+                  </div>
+                )}
+
+                {/* 2. Completed Session Takes */}
+                {sessionTakes.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between px-1">
+                      <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Radio className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Session Takes ({sessionTakes.length})</span>
+                      </h4>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        Latest take evaluated first
+                      </span>
+                    </div>
+
+                    <div className="space-y-4">
+                      {sessionTakes
+                        .slice()
+                        .reverse()
+                        .map((take, idx) => (
+                          <TakePlayerCard
+                            key={take.id}
+                            take={take}
+                            weaknesses={weaknesses}
+                            isLatest={idx === 0}
+                          />
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded-xl bg-[#0B0E14] border border-[#1E2638] p-8 text-center space-y-3">

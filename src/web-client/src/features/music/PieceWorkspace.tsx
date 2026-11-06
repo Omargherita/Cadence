@@ -423,6 +423,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
               {piece.sessions.map((session) => (
                 <div
                   key={session.id}
+                  role="button" tabIndex={0} onKeyDown={e => { if(e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setSelectedSessionId(session.id); } }}
                   onClick={() => setSelectedSessionId(session.id)}
                   className={`rounded-md bg-[#111622] border p-4  space-y-2 cursor-pointer transition-colors ${
                     session.id === selectedSessionId
@@ -534,7 +535,8 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                     <button
                       key={session.id}
                       type="button"
-                      onClick={() => setSelectedSessionId(session.id)}
+                      role="button" tabIndex={0} onKeyDown={e => { if(e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setSelectedSessionId(session.id); } }}
+                  onClick={() => setSelectedSessionId(session.id)}
                       className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-mono transition-all shrink-0 cursor-pointer ${
                         isSelected
                           ? 'bg-blue-950/60 border-blue-500/80 ring-1 ring-blue-500 text-white '

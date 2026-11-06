@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 
 /** Keep focus in floating dialogs and restore it to the opening control. */
-export function useModalFocus(open: boolean, onClose: () => void, modal = true) {
-  const ref = useRef<HTMLDivElement>(null);
+export function useModalFocus<T extends HTMLElement = HTMLDivElement>(open: boolean, onClose: () => void, modal = true) {
+  const ref = useRef<T>(null);
   const close = useRef(onClose); close.current = onClose;
   useEffect(() => {
     if (!open) return;

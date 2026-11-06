@@ -1,3 +1,4 @@
+import { useModalFocus } from './useModalFocus';
 import { useState } from 'react';
 import { CalendarDays, CalendarRange, Inbox, CheckCheck, Library, Menu, X, RefreshCw, Database } from 'lucide-react';
 import { api } from '../services/api';
@@ -11,6 +12,7 @@ interface HeaderProps {
 }
 export function Header(p: HeaderProps) {
   const [open, setOpen] = useState(false);
+  const drawerRef = useModalFocus<HTMLElement>(open, () => setOpen(false));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const navigate = (action: () => void) => { action(); setOpen(false); };
@@ -20,7 +22,7 @@ export function Header(p: HeaderProps) {
   const items = [['today', 'Today', CalendarDays], ['weekly', 'Weekly', CalendarRange], ['unscheduled', 'Unscheduled', Inbox], ['completed', 'Logbook', CheckCheck], ['all', 'All tasks', Inbox]] as const;
   return <>
     {open && <button className="nav-backdrop" aria-label="Close navigation" onClick={() => setOpen(false)} />}
-    <aside className={`app-sidebar ${open ? 'is-open' : ''}`} aria-label="Main navigation">
+    <aside ref={drawerRef} className={`app-sidebar ${open ? 'is-open' : ''}`} aria-label="Main navigation">
       <div className="wordmark"><span className="cadence-mark" aria-hidden="true">Ⅱ</span> Cadence <button className="mobile-only icon-button" aria-label="Close navigation" onClick={() => setOpen(false)}><X size={18}/></button></div>
       <nav><p className="nav-section">Organizer</p>
         {items.map(([key,label,Icon]) => <button key={key} aria-current={p.activeView === 'organizer' && p.horizon === key ? 'page' : undefined} onClick={() => navigate(() => { p.onHorizon(key); p.onSelectView('organizer'); })}><Icon size={16}/>{label}</button>)}

@@ -20,7 +20,7 @@ const CATEGORY_STYLES: Record<TaskCategory, { label: string; badge: string }> = 
 };
 
 const PRIORITY_BADGES: Record<number, { label: string; badge: string }> = {
-  1: { label: 'P1', badge: 'text-amber-400 bg-amber-950/40 border-amber-800/60 font-bold' },
+  1: { label: 'P1', badge: 'text-amber-400 bg-amber-950/40 border-amber-800/60 font-semibold' },
   2: { label: 'P2', badge: 'text-blue-400 bg-blue-950/40 border-blue-800/60 font-medium' },
   3: { label: 'P3', badge: 'text-slate-400 bg-slate-800/40 border-slate-700/60 font-normal' },
 };
@@ -43,10 +43,10 @@ export const TaskItemCard: FC<TaskItemCardProps> = ({
         {/* Toggle Checkbox: Steel blue accent */}
         <button
           type="button"
-          onClick={() => onToggle(task.id)}
+          aria-pressed={task.isCompleted} onClick={() => onToggle(task.id)}
           className={`flex items-center justify-center w-5 h-5 rounded-md border mt-0.5 sm:mt-0 transition-all cursor-pointer shrink-0 ${
             task.isCompleted
-              ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
+              ? 'bg-blue-600 border-blue-500 text-white '
               : 'bg-[#0B0E14] border-slate-700 hover:border-blue-500 text-transparent'
           }`}
           title={task.isCompleted ? 'Mark incomplete' : 'Mark complete'}
@@ -77,28 +77,28 @@ export const TaskItemCard: FC<TaskItemCardProps> = ({
           <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
             {/* Category Badge */}
             <span
-              className={`px-2 py-0.5 rounded-md border text-[11px] font-medium ${cat.badge}`}
+              className={`px-2 py-0.5 rounded-md border text-xs font-medium ${cat.badge}`}
             >
               {cat.label}
             </span>
 
             {/* Priority Badge */}
             <span
-              className={`px-1.5 py-0.5 rounded-md border text-[10px] font-mono ${prio.badge}`}
+              className={`px-1.5 py-0.5 rounded-md border text-xs font-mono ${prio.badge}`}
             >
               {prio.label}
             </span>
 
             {/* Recurrence Badge */}
             {task.recurrence && task.recurrence !== 'None' && (
-              <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-mono text-violet-300 bg-violet-950/40 border-violet-800/60 flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded-md border text-xs font-mono text-violet-300 bg-violet-950/40 border-violet-800/60 flex items-center gap-1">
                 <Repeat className="w-2.5 h-2.5 text-violet-400" />
                 <span>{task.recurrence}</span>
               </span>
             )}
 
             {/* Schedule/Completion Info */}
-            <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
+            <span className="text-xs font-mono text-slate-400 flex items-center gap-1">
               <Clock className="w-3 h-3 text-slate-400" />
               {task.isCompleted && task.completedAtUtc
                 ? `Done ${formatRelativeTime(task.completedAtUtc)}`
@@ -116,7 +116,7 @@ export const TaskItemCard: FC<TaskItemCardProps> = ({
         {task.category === 'Piano' && !task.isCompleted && (
           <button
             onClick={onSwitchToPiano}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-200 border border-indigo-800/80 transition-all cursor-pointer shadow-sm active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-200 border border-indigo-800/80 transition-all cursor-pointer  active:scale-95"
             title="Launch Piano Workspace"
           >
             <Music className="w-3.5 h-3.5 text-indigo-400" />

@@ -17,12 +17,14 @@ import { MentorAssessmentCard } from './MentorAssessmentCard';
 
 interface TakePlayerCardProps {
   take: PracticeTake;
+  action?: React.ReactNode;
   weaknesses?: PieceWeakness[];
   isLatest?: boolean;
 }
 
 export const TakePlayerCard: FC<TakePlayerCardProps> = ({
   take,
+  action,
   weaknesses = [],
   isLatest = false,
 }) => {
@@ -57,6 +59,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
     <div className={`rounded-lg bg-[#111622] border transition-all   overflow-hidden ${
       isLatest ? 'border-violet-600/60 ring-1 ring-violet-500/20' : 'border-[#1E2638]'
     }`}>
+      <div className="flex justify-end">{action}</div>
       {/* Take Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5    border-b border-[#1E2638]">
         <div className="flex items-center gap-3">

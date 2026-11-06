@@ -11,6 +11,7 @@ interface WeaknessTrackerPanelProps {
   weaknesses: PieceWeakness[];
   onAddWeakness: (req: CreateWeaknessRequest) => Promise<void>;
   isLoading?: boolean;
+  renderAction?: (weakness: PieceWeakness) => React.ReactNode;
 }
 
 const CATEGORY_OPTIONS: { value: WeaknessCategory; label: string }[] = [
@@ -26,6 +27,7 @@ const CATEGORY_OPTIONS: { value: WeaknessCategory; label: string }[] = [
 export const WeaknessTrackerPanel: FC<WeaknessTrackerPanelProps> = ({
   weaknesses,
   onAddWeakness,
+  renderAction,
 }) => {
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
@@ -69,7 +71,7 @@ export const WeaknessTrackerPanel: FC<WeaknessTrackerPanelProps> = ({
     {[...improvingWeaknesses,...activeWeaknesses,...(showResolved?resolvedWeaknesses:[])].map(w=><div key={w.id} className="focus-row">
       <StatusGlyph label={w.status} progress={w.status==='Resolved'?1:w.consecutiveCleanSessions/3} tone={w.status==='Resolved'?'blue':'amber'}/>
       <div><span className="measure-token">{w.location}</span><span className="secondary ml-3 text-xs">{CATEGORY_OPTIONS.find(c=>c.value===w.category)?.label || w.category}</span><p>{w.description}</p></div>
-      <span className="focus-count">{w.status==='Active'?`${w.occurrenceCount} occurrences`:`${w.consecutiveCleanSessions}/3 clean days`}</span>
+      <span className="focus-count">{w.status==='Active'?`${w.occurrenceCount} occurrences`:`${w.consecutiveCleanSessions}/3 clean days`}</span>{renderAction?.(w)}
     </div>)}
     {!activeWeaknesses.length&&!improvingWeaknesses.length&&<p className="empty-line">No active focus areas. Add one or analyze a practice take.</p>}
     {resolvedWeaknesses.length>0&&<button className="quiet-button mt-3" onClick={()=>setShowResolved(!showResolved)}>{showResolved?'Hide':'Show'} mastered areas ({resolvedWeaknesses.length})</button>}

@@ -258,7 +258,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
   const activeSession = piece.sessions.find((s) => s.id === selectedSessionId);
 
   return (
-    <div className="piece-workspace space-y-9 pb-16">
+    <div className={`piece-workspace space-y-9 pb-16 ${isScoreModalOpen ? 'score-open' : ''}`}>
       {/* Top Bar with Navigation */}
       <div className="flex items-center justify-between">
         <button
@@ -275,7 +275,11 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
       </div>
 
       <section className="page-heading piece-overview">
-        <h1>{piece.title}</h1><p>{piece.composer} <span className="mx-2">/</span> {bucketInfo.label}</p>
+        <div className="flex items-start justify-between gap-4"><h1>{piece.title}</h1><RecordEditor endpoint={`/api/pieces/${piece.id}`} value={piece}
+            fields={[{ key: 'title', label: 'Title' }, { key: 'composer', label: 'Composer' },
+              { key: 'bucket', label: 'Bucket', options: Object.keys(BUCKET_LABELS) },
+              { key: 'personalGoals', label: 'Personal goals' }, { key: 'interpretationNotes', label: 'Interpretation notes' }]}
+            onSaved={async deleted => { await onRefresh?.(); if (deleted) onBack(); }} /></div><p>{piece.composer} <span className="mx-2">/</span> {bucketInfo.label}</p>
         <div className="piece-facts"><span>{piece.sessions.length} sessions</span><span>{piece.sessions.reduce((total,session)=>total+session.durationMinutes,0)}m recorded</span></div>
         {piece.personalGoals && <p className="piece-prose">{piece.personalGoals}</p>}
         {piece.interpretationNotes && <p className="piece-prose">{piece.interpretationNotes}</p>}
@@ -287,6 +291,9 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
       </section>
       {/* Persistent Weakness State Machine Panel */}
       <WeaknessTrackerPanel
+        renderAction={weakness => (<RecordEditor endpoint={`/api/pieces/${piece.id}/weaknesses/${weakness.id}`} value={weakness}
+              fields={[{ key: 'location', label: 'Location' }, { key: 'description', label: 'Description' }, { key: 'category', label: 'Category', options: ['PitchAccuracy', 'RhythmAndTempo', 'DynamicsAndBalance', 'Voicing', 'ArticulationAndPedal', 'PhrasingAndRubato', 'PhysicalTension'] }]}
+              onSaved={async () => { setWeaknesses(await api.getWeaknesses(piece.id)); await onRefresh?.(); }} />)}
         weaknesses={weaknesses}
         onAddWeakness={handleAddWeakness}
       />
@@ -436,7 +443,11 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                       )}
                     </div>
                     <span className="text-xs font-mono text-slate-400">
-                      {formatDateTime(session.startedAtUtc)}
+                      {formatDateTime(session.startedAtUtc)}<RecordEditor endpoint={`/api/pieces/${piece.id}/sessions/${session.id}`} value={session}
+              fields={[{ key: 'durationMinutes', label: 'Duration in minutes', type: 'number' },
+                { key: 'targetSection', label: 'Target section' }, { key: 'userSelfReflection', label: 'Reflection' },
+                { key: 'nextSessionGoal', label: 'Next session goal' }]}
+              onSaved={async deleted => { if (deleted && selectedSessionId === session.id) { setSelectedSessionId(null); setSessionTakes([]); } await onRefresh?.(); }} />
                     </span>
                   </div>
 
@@ -691,6 +702,9 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                         .map((take, idx) => (
                           <TakePlayerCard
                             key={take.id}
+                            action={<RecordEditor endpoint={`/api/pieces/${piece.id}/sessions/${take.practiceSessionId}/takes/${take.id}`} value={take}
+              fields={[{ key: 'targetSection', label: 'Target section' }, { key: 'userSelfReflection', label: 'Reflection' }]}
+              onSaved={async () => { setSessionTakes(await api.getTakes(piece.id, take.practiceSessionId)); await onRefresh?.(); }} />}
                             take={take}
                             weaknesses={weaknesses}
                             isLatest={idx === 0}
@@ -730,43 +744,11 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
               No practice sessions logged yet.
             </p>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Log a practice session above to start adding takes and start tracking takes.
+              Log a practice session above to start adding takes for feedback.
             </p>
           </div>
         )}
       </div>
-
-      <details className="border border-slate-700 rounded-md p-4">
-        <summary className="cursor-pointer">Manage piece, sessions, weaknesses and takes</summary>
-        <p className="text-xs text-slate-400 my-2">Editing requires a connection and a fully synced queue. Take edits change notes; existing assessments are preserved.</p>
-        <div className="space-y-3">
-          <div>Piece <RecordEditor endpoint={`/api/pieces/${piece.id}`} value={piece}
-            fields={[{ key: 'title', label: 'Title' }, { key: 'composer', label: 'Composer' },
-              { key: 'bucket', label: 'Bucket', options: Object.keys(BUCKET_LABELS) },
-              { key: 'personalGoals', label: 'Personal goals' }, { key: 'interpretationNotes', label: 'Interpretation notes' }]}
-            onSaved={async deleted => { await onRefresh?.(); if (deleted) onBack(); }} /></div>
-          {piece.sessions.map(session => <div key={session.id}>
-            Session {formatDateTime(session.startedAtUtc)}
-            <RecordEditor endpoint={`/api/pieces/${piece.id}/sessions/${session.id}`} value={session}
-              fields={[{ key: 'durationMinutes', label: 'Duration in minutes', type: 'number' },
-                { key: 'targetSection', label: 'Target section' }, { key: 'userSelfReflection', label: 'Reflection' },
-                { key: 'nextSessionGoal', label: 'Next session goal' }]}
-              onSaved={async deleted => { if (deleted && selectedSessionId === session.id) { setSelectedSessionId(null); setSessionTakes([]); } await onRefresh?.(); }} />
-          </div>)}
-          {weaknesses.map(weakness => <div key={weakness.id}>
-            Weakness: {weakness.location}
-            <RecordEditor endpoint={`/api/pieces/${piece.id}/weaknesses/${weakness.id}`} value={weakness}
-              fields={[{ key: 'location', label: 'Location' }, { key: 'description', label: 'Description' }, { key: 'category', label: 'Category', options: ['PitchAccuracy', 'RhythmAndTempo', 'DynamicsAndBalance', 'Voicing', 'ArticulationAndPedal', 'PhrasingAndRubato', 'PhysicalTension'] }]}
-              onSaved={async () => { setWeaknesses(await api.getWeaknesses(piece.id)); await onRefresh?.(); }} />
-          </div>)}
-          {sessionTakes.map(take => <div key={take.id}>
-            Take #{take.takeNumber}
-            <RecordEditor endpoint={`/api/pieces/${piece.id}/sessions/${take.practiceSessionId}/takes/${take.id}`} value={take}
-              fields={[{ key: 'targetSection', label: 'Target section' }, { key: 'userSelfReflection', label: 'Reflection' }]}
-              onSaved={async () => { setSessionTakes(await api.getTakes(piece.id, take.practiceSessionId)); await onRefresh?.(); }} />
-          </div>)}
-        </div>
-      </details>
 
       {/* Score Viewer Modal */}
       <ScoreViewerModal

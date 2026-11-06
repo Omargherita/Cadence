@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { useModalFocus } from './useModalFocus';
 import { useState } from 'react';
 import { db } from '../services/db';
 import { syncEngine } from '../services/syncEngine';
@@ -12,6 +14,7 @@ export function RecordEditor({ endpoint, value, fields, onSaved, allowDelete = t
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const dialogRef = useModalFocus(open, () => { if (!busy) setOpen(false); });
   async function save(deleted: boolean) {
     if (deleted && !window.confirm('Delete this record and its associated records?')) return;
     setBusy(true); setError('');
@@ -39,19 +42,20 @@ export function RecordEditor({ endpoint, value, fields, onSaved, allowDelete = t
   }
   return <span onClick={e => e.stopPropagation()}>
     <button type="button" className="text-xs text-blue-300 px-2" onClick={() => { setDraft({ ...value }); setOpen(true); }}>Edit</button>
-    {open && <div role="dialog" aria-modal="true" aria-label="Edit record" className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-      <div className="bg-slate-900 rounded-xl p-5 space-y-3 max-h-[90vh] overflow-auto w-full max-w-lg">
+    {open && createPortal(<div onClick={e => { if(e.target === e.currentTarget && !busy) setOpen(false); }} role="dialog" aria-modal="true" aria-label="Edit record" className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+      <div ref={dialogRef} className="record-dialog bg-[#111622] rounded-lg p-5 space-y-3 max-h-[90vh] overflow-auto w-full max-w-lg">
+        <h2 className="text-lg font-medium">Edit record</h2>
         {fields.map(field => <label key={field.key} className="block text-sm">{field.label}
-          {field.options ? <select className="block w-full bg-slate-800 p-2" value={String(draft[field.key] ?? '')} onChange={e => setDraft({ ...draft, [field.key]: e.target.value })}>
-            {field.options.map(option => <option key={option}>{option}</option>)}
-          </select> : <input className="block w-full bg-slate-800 p-2" type={field.type ?? 'text'} value={String(draft[field.key] ?? '')}
+          {field.options ? <select className="block w-full bg-[#0B0E14] border border-[#1E2638] rounded-md p-2.5 mt-2" value={String(draft[field.key] ?? '')} onChange={e => setDraft({ ...draft, [field.key]: e.target.value })}>
+            {field.options.map(option => <option key={option}>{option.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>)}
+          </select> : <input className="block w-full bg-[#0B0E14] border border-[#1E2638] rounded-md p-2.5 mt-2" type={field.type ?? 'text'} value={String(draft[field.key] ?? '')}
             onChange={e => setDraft({ ...draft, [field.key]: field.type === 'number' ? Number(e.target.value) : field.type === 'date' ? e.target.value || null : e.target.value })} />}
         </label>)}
         {error && <p role="alert" className="text-red-300">{error}</p>}
-        <button type="button" disabled={busy} onClick={() => save(false)} className="px-3 text-blue-300">Save</button>
+        <button type="button" disabled={busy} onClick={() => save(false)} className="px-3 text-blue-300">Save changes</button>
         {allowDelete && <button type="button" disabled={busy} onClick={() => save(true)} className="px-3 text-red-300">Delete</button>}
         <button type="button" disabled={busy} onClick={() => setOpen(false)} className="px-3">Cancel</button>
       </div>
-    </div>}
+    </div>, document.body)}
   </span>;
 }

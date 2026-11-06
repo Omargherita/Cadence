@@ -15,6 +15,8 @@ export function Header(p: HeaderProps) {
   const [message, setMessage] = useState('');
   const navigate = (action: () => void) => { action(); setOpen(false); };
   async function backup() { setBusy(true); try { const result = await api.triggerBackup(); setMessage(`Backup saved: ${result.backupPath.split('/').pop()}`); } catch { setMessage('Backup failed. Check the host connection and try again.'); } finally { setBusy(false); } }
+  const practiced = p.pieces.flatMap(piece => piece.sessions).filter(session => new Date(session.startedAtUtc).toDateString() === new Date().toDateString()).reduce((total,session) => total + session.durationMinutes,0);
+  const target = parseInt(DAY_ARCHETYPES.find(a => a.type === p.archetype)?.pianoTarget || '30',10) || 30;
   const items = [['today', 'Today', CalendarDays], ['weekly', 'Weekly', CalendarRange], ['unscheduled', 'Unscheduled', Inbox], ['completed', 'Logbook', CheckCheck], ['all', 'All tasks', Inbox]] as const;
   return <>
     {open && <button className="nav-backdrop" aria-label="Close navigation" onClick={() => setOpen(false)} />}
@@ -30,7 +32,7 @@ export function Header(p: HeaderProps) {
       </nav>
       <footer className="sidebar-footer"><label htmlFor="day-structure">Day structure</label><select id="day-structure" value={p.archetype} onChange={e => p.onArchetype(e.target.value as DayArchetype)}>{DAY_ARCHETYPES.map(a => <option key={a.type} value={a.type}>{a.label}</option>)}</select>
         <p className="secondary">{DAY_ARCHETYPES.find(a => a.type === p.archetype)?.pianoTarget}</p>
-        <div className="system-row"><span className={p.isOnline ? 'secondary' : 'attention'}>{p.isOnline ? '● Connected' : '○ Offline'}</span><button disabled={busy || !p.isOnline} onClick={backup} title="Create database backup"><Database size={14}/>{busy ? 'Saving…' : 'Backup'}</button></div>
+        <p className="secondary">{practiced}m practiced today</p><progress className="practice-progress" aria-label="Daily practice target" value={practiced} max={target}/><div className="system-row"><span className={p.isOnline ? 'secondary' : 'attention'}>{p.isOnline ? '● Connected' : '○ Offline'}</span><button disabled={busy || !p.isOnline} onClick={backup} title="Create database backup"><Database size={14}/>{busy ? 'Saving…' : 'Backup'}</button></div>
         {p.pendingOutboxCount > 0 && <button disabled={!p.isOnline || p.isSyncing} onClick={p.onSyncNow}><RefreshCw size={14}/>{p.isSyncing ? 'Syncing…' : `${p.pendingOutboxCount} queued · Sync now`}</button>}
         <p role="status" className="system-message">{message}</p>
       </footer>

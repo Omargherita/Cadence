@@ -15,8 +15,8 @@ import { cadenceRepository } from './services/cadenceRepository';
 import { syncEngine, SyncEngineStatus } from './services/syncEngine';
 
 export function App() {
-  const [activeView, setActiveView] = useState<'organizer' | 'library'>('organizer');
-  const [horizon, setHorizon] = useState<Horizon>('today');
+  const [activeView, setActiveView] = useState<'organizer' | 'library'>(() => location.hash.startsWith('#repertoire') ? 'library' : 'organizer');
+  const [horizon, setHorizon] = useState<Horizon>(() => { const value = location.hash.split('/')[1]; return ['today','weekly','unscheduled','completed','all'].includes(value) ? value as Horizon : 'today'; });
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -32,8 +32,23 @@ export function App() {
 
   // Musical Library State
   const [pieces, setPieces] = useState<Piece[]>([]);
-  const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
+  const [selectedPieceId, setSelectedPieceId] = useState<string | null>(() => location.hash.startsWith('#repertoire/') ? location.hash.split('/')[1] : null);
   const [isLoadingPieces, setIsLoadingPieces] = useState(false);
+
+  useEffect(() => {
+    const hash = activeView === 'library' ? `#repertoire${selectedPieceId ? '/' + selectedPieceId : ''}` : `#organizer/${horizon}`;
+    if (location.hash !== hash) history.pushState(null, '', hash);
+  }, [activeView, selectedPieceId, horizon]);
+  useEffect(() => {
+    const restore = () => {
+      const [view, detail] = location.hash.slice(1).split('/');
+      setActiveView(view === 'repertoire' ? 'library' : 'organizer');
+      setSelectedPieceId(view === 'repertoire' ? detail || null : null);
+      if (view !== 'repertoire') setHorizon(['today','weekly','unscheduled','completed','all'].includes(detail) ? detail as Horizon : 'today');
+    };
+    window.addEventListener('popstate', restore); window.addEventListener('hashchange', restore);
+    return () => { window.removeEventListener('popstate', restore); window.removeEventListener('hashchange', restore); };
+  }, []);
 
   // 1. Request persistent storage on app initialization
   useEffect(() => {

@@ -219,7 +219,7 @@ export function App() {
       {/* Main Content Workspace */}
       <main className="app-canvas">
         {activeView === 'organizer' ? (
-          <OrganizerView
+          <OrganizerView horizon={horizon}
             tasks={tasks}
             selectedArchetype={selectedArchetype}
             onSelectArchetype={handleSelectArchetype}

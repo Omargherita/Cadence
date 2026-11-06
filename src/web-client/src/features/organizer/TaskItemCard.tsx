@@ -36,11 +36,7 @@ export const TaskItemCard: FC<TaskItemCardProps> = ({
 
   return (
     <div
-      className={`group relative flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-xl border transition-all duration-150 ${
-        task.isCompleted
-          ? 'bg-[#0B0E14]/60 border-[#1E2638]/50 opacity-70'
-          : 'bg-[#111622] hover:bg-[#141A29] border-[#1E2638] shadow-sm'
-      }`}
+      className={`task-row ${task.isCompleted ? 'is-completed' : ''}`}
     >
       {/* Left: Checkbox & Title */}
       <div className="flex items-start sm:items-center gap-3 flex-1 min-w-0">

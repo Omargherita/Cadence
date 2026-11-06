@@ -26,7 +26,7 @@ import {
   PracticeTake,
   RepertoireBucket,
 } from '../../types/cadence';
-import { api } from '../../services/api';
+import { api, isPermanentApiError } from '../../services/api';
 import { cadenceRepository } from '../../services/cadenceRepository';
 import { syncEngine } from '../../services/syncEngine';
 import { formatDateTime, formatRelativeTime } from '../../utils/date';
@@ -206,6 +206,12 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
       await loadWeaknesses();
       if (onRefresh) await onRefresh();
     } catch (err: any) {
+      // The host answered and rejected the take (e.g. 400/404/413): retrying later can't help,
+      // so report it to the user rather than queueing it offline forever.
+      if (isPermanentApiError(err)) {
+        throw err;
+      }
+
       console.warn('Network upload failed, queueing take offline in IndexedDB', err);
       const pendingTake: PendingTake = {
         id: crypto.randomUUID(),
@@ -609,10 +615,20 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                           </p>
                         )}
 
-                        <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
-                          <Upload className="w-3.5 h-3.5 text-blue-400" />
-                          <span>Stored safely in Dexie. Will upload and trigger Maestro assessment when backend is reached.</span>
-                        </div>
+                        {take.syncError ? (
+                          <div className="flex items-start gap-1.5 p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[11px] font-mono text-amber-300">
+                            <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                            <span>
+                              The host rejected this take and it will not be retried: {take.syncError}. Discard it
+                              and upload a corrected file.
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
+                            <Upload className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Stored safely in Dexie. Will upload and trigger Maestro assessment when backend is reached.</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

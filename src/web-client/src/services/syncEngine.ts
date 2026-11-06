@@ -1,11 +1,38 @@
 import { db, OutboxItem } from './db';
-import { api } from './api';
+import { api, buildApiError } from './api';
 
 export interface SyncEngineStatus {
   isSyncing: boolean;
   pendingCount: number;
+  /** Mutations/takes the host permanently rejected. They no longer block the queue. */
+  failedCount: number;
   lastSyncedAtUtc: string | null;
   lastError: string | null;
+}
+
+/** How many server-side (5xx) failures an item may accumulate before it is parked. */
+const MAX_SERVER_ERROR_ATTEMPTS = 5;
+
+/**
+ * - `retry`: the host is unreachable/overloaded (network error, 408/429/502/503/504). Stop and try later;
+ *   this never counts against the item since nothing is wrong with the item itself.
+ * - `server`: the host answered 5xx (e.g. 500). Retry a few times, then park the item.
+ * - `permanent`: the host rejected the request (other 4xx). Retrying can never succeed.
+ */
+type FailureKind = 'retry' | 'server' | 'permanent';
+
+function getHttpStatus(err: unknown): number | null {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === 'number' ? status : null;
+}
+
+function classifyFailure(err: unknown): FailureKind {
+  const status = getHttpStatus(err);
+  if (status === null) return 'retry'; // fetch() rejected: offline / DNS / connection refused
+  if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) return 'retry';
+  if (status >= 500) return 'server';
+  if (status >= 400) return 'permanent';
+  return 'retry';
 }
 
 export class SyncEngine {
@@ -23,13 +50,12 @@ export class SyncEngine {
   }
 
   private async notify() {
-    const pendingMutations = await db.syncOutbox.count();
-    const pendingTakes = await db.pendingTakesOutbox.count();
-    const pendingCount = pendingMutations + pendingTakes;
+    const [pendingCount, failedCount] = await Promise.all([this.getPendingCount(), this.getFailedCount()]);
 
     const status: SyncEngineStatus = {
       isSyncing: this.isSyncing,
       pendingCount,
+      failedCount,
       lastSyncedAtUtc: this.lastSyncedAtUtc,
       lastError: this.lastError,
     };
@@ -38,10 +64,23 @@ export class SyncEngine {
     }
   }
 
+  /** Mutations still waiting to be replayed. Excludes dead-lettered items and parked takes. */
+  public async getPendingMutationCount(): Promise<number> {
+    return db.syncOutbox.count();
+  }
+
+  /** All work still waiting to sync (mutations + takes). Parked (rejected) takes are not "pending". */
   public async getPendingCount(): Promise<number> {
     const pendingMutations = await db.syncOutbox.count();
-    const pendingTakes = await db.pendingTakesOutbox.count();
+    const pendingTakes = await db.pendingTakesOutbox.filter((t) => !t.syncError).count();
     return pendingMutations + pendingTakes;
+  }
+
+  /** Items the host permanently rejected (dead-lettered mutations + parked takes). */
+  public async getFailedCount(): Promise<number> {
+    const deadLetters = await db.deadLetterOutbox.count();
+    const parkedTakes = await db.pendingTakesOutbox.filter((t) => Boolean(t.syncError)).count();
+    return deadLetters + parkedTakes;
   }
 
   /**
@@ -78,14 +117,37 @@ export class SyncEngine {
           await this.notify();
         } catch (err: any) {
           console.warn(`Failed to replay mutation ${item.id} (${item.operationType}):`, err);
-          this.lastError = err?.message || 'Sync failed';
-          // Stop queue execution on network failure so order is preserved
-          break;
+          const message = err?.message || 'Sync failed';
+          const kind = classifyFailure(err);
+
+          if (kind === 'retry') {
+            // Transient outage: stop here so FIFO order is preserved and retry on the next tick.
+            this.lastError = message;
+            break;
+          }
+
+          if (kind === 'server') {
+            const attempts = (item.attempts ?? 0) + 1;
+            if (attempts < MAX_SERVER_ERROR_ATTEMPTS) {
+              await db.syncOutbox.update(item.id, { attempts });
+              this.lastError = message;
+              break;
+            }
+          }
+
+          // Permanent rejection (or retry budget exhausted): park it so it can't wedge the queue,
+          // then keep going so later, independent mutations still sync.
+          await this.deadLetter(item, message, getHttpStatus(err));
+          this.lastError = `Discarded ${item.operationType}: ${message}`;
+          await this.notify();
         }
       }
 
-      // Replay pending offline practice takes
-      const pendingTakes = await db.pendingTakesOutbox.orderBy('createdAtUtc').toArray();
+      // Replay pending offline practice takes (skipping ones the host already rejected)
+      const pendingTakes = await db.pendingTakesOutbox
+        .orderBy('createdAtUtc')
+        .filter((t) => !t.syncError)
+        .toArray();
       for (const take of pendingTakes) {
         try {
           const formData = new FormData();
@@ -104,14 +166,36 @@ export class SyncEngine {
           await this.notify();
         } catch (takeErr: any) {
           console.warn(`Failed to replay pending take ${take.id}:`, takeErr);
-          this.lastError = takeErr?.message || 'Take sync failed';
-          break;
+          const message = takeErr?.message || 'Take sync failed';
+          const kind = classifyFailure(takeErr);
+
+          if (kind === 'retry') {
+            this.lastError = message;
+            break;
+          }
+
+          if (kind === 'server') {
+            const attempts = (take.attempts ?? 0) + 1;
+            if (attempts < MAX_SERVER_ERROR_ATTEMPTS) {
+              await db.pendingTakesOutbox.update(take.id, { attempts });
+              this.lastError = message;
+              break;
+            }
+          }
+
+          // Never delete the user's recording: keep the blob, mark it as rejected and move on.
+          await db.pendingTakesOutbox.update(take.id, {
+            syncError: message,
+            syncFailedAtUtc: new Date().toISOString(),
+          });
+          this.lastError = `Take rejected by host: ${message}`;
+          await this.notify();
         }
       }
 
       if (processedCount > 0) {
         this.lastSyncedAtUtc = new Date().toISOString();
-        // Refresh local read caches from server
+        // Refresh local read caches from server (a no-op while mutations are still queued)
         await this.syncDown();
       }
 
@@ -125,6 +209,18 @@ export class SyncEngine {
     }
   }
 
+  private async deadLetter(item: OutboxItem, reason: string, httpStatus: number | null): Promise<void> {
+    await db.transaction('rw', db.syncOutbox, db.deadLetterOutbox, async () => {
+      await db.deadLetterOutbox.put({
+        ...item,
+        failedAtUtc: new Date().toISOString(),
+        failureReason: reason,
+        httpStatus,
+      });
+      await db.syncOutbox.delete(item.id);
+    });
+  }
+
   private async executeMutation(item: OutboxItem): Promise<void> {
     const url = typeof window !== 'undefined' ? item.endpoint : `http://127.0.0.1:5006${item.endpoint}`;
     const res = await fetch(url, {
@@ -135,13 +231,16 @@ export class SyncEngine {
 
     // 2xx or 404 on delete is considered resolved
     if (!res.ok && !(res.status === 404 && item.method === 'DELETE')) {
-      const errorJson = await res.json().catch(() => ({}));
-      throw new Error(errorJson.error || `HTTP ${res.status}: ${res.statusText}`);
+      throw await buildApiError(res, 'HTTP ' + res.status);
     }
   }
 
   /**
    * Refreshes local Dexie tables from the backend API.
+   *
+   * Only replaces the local cache when nothing is queued: with queued mutations the local rows hold
+   * optimistic state the server hasn't seen yet, and wiping them would make queued creates/toggles
+   * vanish from the UI until they replay.
    */
   public async syncDown(): Promise<void> {
     try {
@@ -150,7 +249,11 @@ export class SyncEngine {
         api.getPieces(),
       ]);
 
-      await db.transaction('rw', db.tasks, db.pieces, async () => {
+      await db.transaction('rw', db.tasks, db.pieces, db.syncOutbox, async () => {
+        if ((await db.syncOutbox.count()) > 0) {
+          return;
+        }
+
         await db.tasks.clear();
         await db.tasks.bulkPut(tasks);
 

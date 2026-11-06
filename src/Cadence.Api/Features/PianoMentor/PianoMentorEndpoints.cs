@@ -111,7 +111,7 @@ public static class PianoMentorEndpoints
                 Status = WeaknessStatus.Active,
                 OccurrenceCount = 1,
                 ConsecutiveCleanSessions = 0,
-                LastEvaluatedSessionDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                LastEvaluatedSessionDate = CadenceTime.Today(),
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
 

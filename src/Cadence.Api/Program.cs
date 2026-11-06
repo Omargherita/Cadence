@@ -23,6 +23,9 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     WebRootPath = resolvedWebRoot
 });
 
+// Calendar-day semantics (recurring tasks, weakness mastery days) follow the owner's local zone, not UTC.
+CadenceTime.TryConfigure(builder.Configuration["Cadence:TimeZone"]);
+
 // Configure Upload Size Limits (up to 500 MB for HD practice video takes & score PDFs)
 const long maxUploadBytes = 500L * 1024 * 1024;
 builder.WebHost.ConfigureKestrel(options =>

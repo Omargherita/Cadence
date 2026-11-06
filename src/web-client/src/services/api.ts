@@ -9,9 +9,35 @@ import {
   PracticeSession,
   PracticeTake,
   TaskItem,
+  ToggleTaskRequest,
 } from '../types/cadence';
 
 const BASE_URL = typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:5006/api';
+
+/** HTTP failure with its status code attached (network failures stay plain TypeErrors with no status). */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export async function buildApiError(res: Response, fallback: string): Promise<ApiError> {
+  const body = await res.json().catch(() => ({}));
+  return new ApiError(body?.error || `${fallback}: ${res.statusText || res.status}`, res.status);
+}
+
+/**
+ * True when the host understood the request and rejected it for good (4xx other than 408/429).
+ * Retrying such a request can never succeed, so it must not be queued/retried forever.
+ */
+export function isPermanentApiError(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
 
 export const api = {
   async getHealth(): Promise<HealthStatus> {
@@ -40,11 +66,13 @@ export const api = {
     return res.json();
   },
 
-  async toggleTask(id: string): Promise<TaskItem> {
+  async toggleTask(id: string, req?: ToggleTaskRequest): Promise<TaskItem> {
     const res = await fetch(`${BASE_URL}/tasks/${id}/toggle`, {
       method: 'PATCH',
+      headers: req ? { 'Content-Type': 'application/json' } : undefined,
+      body: req ? JSON.stringify(req) : undefined,
     });
-    if (!res.ok) throw new Error(`Failed to toggle task: ${res.statusText}`);
+    if (!res.ok) throw await buildApiError(res, 'Failed to toggle task');
     return res.json();
   },
 
@@ -138,10 +166,7 @@ export const api = {
       method: 'POST',
       body: formData,
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `Failed to analyze take: ${res.statusText}`);
-    }
+    if (!res.ok) throw await buildApiError(res, 'Failed to analyze take');
     return res.json();
   },
 

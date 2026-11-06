@@ -41,7 +41,7 @@ public class PianoMentorService : IPianoMentorService
         Action<PieceWeakness>? onWeaknessAdded = null,
         CancellationToken cancellationToken = default)
     {
-        var sessionDate = DateOnly.FromDateTime(session.StartedAtUtc.UtcDateTime);
+        var sessionDate = CadenceTime.ToLocalDate(session.StartedAtUtc);
         var apiKey = _configuration["GEMINI_API_KEY"]
             ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
             ?? _configuration["Cadence:GeminiApiKey"];

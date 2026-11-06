@@ -94,7 +94,7 @@ public static class TaskEndpoints
             return Results.Created($"/api/tasks/{task.Id}", response);
         });
 
-        group.MapPatch("/{id:guid}/toggle", async (Guid id, CadenceDbContext db) =>
+        group.MapPatch("/{id:guid}/toggle", async (Guid id, [FromBody] ToggleTaskRequest? request, CadenceDbContext db) =>
         {
             var task = await db.Tasks.FindAsync(id);
             if (task is null)
@@ -109,7 +109,8 @@ public static class TaskEndpoints
             // When completing a recurring task, schedule the next occurrence
             if (task.IsCompleted && task.Recurrence != RecurrencePattern.None)
             {
-                var baseDate = task.ScheduledDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+                // Prefer the client's local calendar date; fall back to the server's local (not UTC) date.
+                var baseDate = task.ScheduledDate ?? request?.ClientDate ?? CadenceTime.Today();
                 var nextDate = task.Recurrence switch
                 {
                     RecurrencePattern.Daily => baseDate.AddDays(1),
@@ -118,16 +119,22 @@ public static class TaskEndpoints
                     _ => baseDate
                 };
 
+                // Reuse the id the client already gave its optimistic copy so both sides converge on one row.
+                var nextId = request?.NextOccurrenceId is { } clientId && clientId != Guid.Empty
+                    ? clientId
+                    : Guid.CreateVersion7();
+
                 var alreadyExists = await db.Tasks.AnyAsync(t =>
-                    t.Title == task.Title &&
-                    t.ScheduledDate == nextDate &&
-                    !t.IsCompleted);
+                    t.Id == nextId ||
+                    (t.Title == task.Title &&
+                     t.ScheduledDate == nextDate &&
+                     !t.IsCompleted));
 
                 if (!alreadyExists)
                 {
                     var nextTask = new TaskItem
                     {
-                        Id = Guid.CreateVersion7(),
+                        Id = nextId,
                         Title = task.Title,
                         Category = task.Category,
                         Priority = task.Priority,

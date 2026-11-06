@@ -190,6 +190,18 @@ export interface PendingTake {
   originalFileName: string;
   mimeType: string;
   createdAtUtc: string;
+  /** Count of server-side (5xx) failures; the take is parked once it exceeds the retry budget. */
+  attempts?: number;
+  /** Set when the host permanently rejected this take. Parked takes are skipped by the sync loop. */
+  syncError?: string | null;
+  syncFailedAtUtc?: string | null;
+}
+
+export interface ToggleTaskRequest {
+  /** Id of the next recurring occurrence the client already spawned optimistically. */
+  nextOccurrenceId?: string;
+  /** Client's local calendar date (YYYY-MM-DD), the recurrence base for unscheduled tasks. */
+  clientDate?: string;
 }
 
 export interface TaskItem {

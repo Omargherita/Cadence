@@ -14,7 +14,7 @@ import {
   Repeat,
   Trash2,
 } from 'lucide-react';
-import { getTodayIsoDate } from '../../utils/date';
+import { addDaysToIsoDate, getTodayIsoDate, parseIsoDateLocal } from '../../utils/date';
 
 interface OrganizerViewProps {
   tasks: TaskItem[];
@@ -54,22 +54,18 @@ export const OrganizerView: FC<OrganizerViewProps> = ({
   const incompleteCount = tasks.filter((t) => !t.isCompleted).length;
   const completedCount = tasks.filter((t) => t.isCompleted).length;
 
-  // Build the 7 days of the current week (Monday through Sunday)
+  // Build the 7 days of the current week (Monday through Sunday) in the user's local calendar
   const getWeekDates = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 is Sunday, 1 is Monday...
+    const dayOfWeek = parseIsoDateLocal(todayStr).getDay(); // 0 is Sunday, 1 is Monday...
     const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const monday = new Date(today);
-    monday.setDate(today.getDate() + diffToMonday);
+    const mondayIso = addDaysToIsoDate(todayStr, diffToMonday);
 
     const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const days = [];
 
     for (let i = 0; i < 7; i++) {
-      const current = new Date(monday);
-      current.setDate(monday.getDate() + i);
-      const iso = current.toISOString().split('T')[0];
-      const shortDate = current.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const iso = addDaysToIsoDate(mondayIso, i);
+      const shortDate = parseIsoDateLocal(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       days.push({
         iso,
         dayName: dayNames[i],

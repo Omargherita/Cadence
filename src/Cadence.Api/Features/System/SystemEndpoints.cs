@@ -23,8 +23,8 @@ public static class SystemEndpoints
         {
             paths.EnsureDirectoriesCreated();
 
-            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            var backupFileName = $"app_{timestamp}.db";
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fffffff");
+            var backupFileName = $"cadence-{timestamp}.db";
             var backupPath = Path.Combine(paths.BackupsDir, backupFileName);
 
             if (File.Exists(backupPath))

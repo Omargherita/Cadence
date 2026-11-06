@@ -25,6 +25,6 @@ sqlite3 "${DB_FILE}" ".backup '${BACKUP_FILE}'"
 chmod 600 "${BACKUP_FILE}"
 
 # Keep last 30 daily backups
-find "${BACKUP_DIR}" -name "cadence-*.db" -mtime +30 -delete
+find "${BACKUP_DIR}" \( -name "cadence-*.db" -o -name "app_*.db" \) -mtime +30 -delete
 
 echo "Backup completed successfully: $(du -h "${BACKUP_FILE}" | cut -f1)"

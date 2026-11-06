@@ -1,3 +1,4 @@
+import { RecordEditor } from '../../components/RecordEditor';
 import { FC } from 'react';
 import { Check, Trash2, ChevronRight, Music, Clock, Repeat } from 'lucide-react';
 import { TaskCategory, TaskItem } from '../../types/cadence';
@@ -68,6 +69,12 @@ export const TaskItemCard: FC<TaskItemCardProps> = ({
               }`}
             >
               {task.title}
+              <RecordEditor endpoint={`/api/tasks/${task.id}`} value={task} allowDelete={false}
+                fields={[{ key: 'title', label: 'Title' }, { key: 'priority', label: 'Priority (1–3)', type: 'number' },
+                  { key: 'scheduledDate', label: 'Scheduled date', type: 'date' },
+                  { key: 'category', label: 'Category', options: Object.keys(CATEGORY_STYLES) },
+                  { key: 'recurrence', label: 'Recurrence', options: ['None', 'Daily', 'Weekdays', 'Weekly'] }]}
+                onSaved={async () => { window.dispatchEvent(new Event('cadence-record-updated')); }} />
             </span>
           </div>
 

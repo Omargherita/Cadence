@@ -38,7 +38,7 @@ builder.Services.Configure<FormOptions>(options =>
 });
 
 // Configure Storage Paths and Directories
-var storagePaths = new CadenceStoragePaths();
+var storagePaths = new CadenceStoragePaths(builder.Configuration["Cadence:StorageRoot"]);
 storagePaths.EnsureDirectoriesCreated();
 builder.Services.AddSingleton(storagePaths);
 
@@ -70,27 +70,9 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<CadenceDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    await DatabaseSchema.InitializeAsync(db);
     await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
     await db.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
-
-    try
-    {
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE PracticeTakes ADD COLUMN ObjectiveDspMetricsJson TEXT;");
-    }
-    catch
-    {
-        // Ignored: Column already exists or table was just created
-    }
-
-    try
-    {
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks ADD COLUMN Recurrence TEXT;");
-    }
-    catch
-    {
-        // Ignored: Column already exists or table was just created
-    }
 }
 
 // Enable Serving Compiled Frontend (PWA)
@@ -101,6 +83,7 @@ app.UseStaticFiles();
 app.MapSystemEndpoints();
 app.MapTaskEndpoints();
 app.MapMusicalLibraryEndpoints();
+app.MapDomainEditingEndpoints();
 app.MapPianoMentorEndpoints();
 app.MapMediaStreamEndpoints();
 

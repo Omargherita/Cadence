@@ -1,3 +1,4 @@
+import { RecordEditor } from '../../components/RecordEditor';
 import React, { FC, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -277,6 +278,37 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
         </span>
       </div>
 
+      <details className="border border-slate-700 rounded-xl p-4">
+        <summary className="cursor-pointer">Manage piece, sessions, weaknesses and takes</summary>
+        <p className="text-xs text-slate-400 my-2">Editing requires a connection and a fully synced queue. Take edits change notes; existing assessments are preserved.</p>
+        <div className="space-y-3">
+          <div>Piece <RecordEditor endpoint={`/api/pieces/${piece.id}`} value={piece}
+            fields={[{ key: 'title', label: 'Title' }, { key: 'composer', label: 'Composer' },
+              { key: 'bucket', label: 'Bucket', options: Object.keys(BUCKET_LABELS) },
+              { key: 'personalGoals', label: 'Personal goals' }, { key: 'interpretationNotes', label: 'Interpretation notes' }]}
+            onSaved={async deleted => { await onRefresh?.(); if (deleted) onBack(); }} /></div>
+          {piece.sessions.map(session => <div key={session.id}>
+            Session {formatDateTime(session.startedAtUtc)}
+            <RecordEditor endpoint={`/api/pieces/${piece.id}/sessions/${session.id}`} value={session}
+              fields={[{ key: 'durationMinutes', label: 'Duration in minutes', type: 'number' },
+                { key: 'targetSection', label: 'Target section' }, { key: 'userSelfReflection', label: 'Reflection' },
+                { key: 'nextSessionGoal', label: 'Next session goal' }]}
+              onSaved={async deleted => { if (deleted && selectedSessionId === session.id) { setSelectedSessionId(null); setSessionTakes([]); } await onRefresh?.(); }} />
+          </div>)}
+          {weaknesses.map(weakness => <div key={weakness.id}>
+            Weakness: {weakness.location}
+            <RecordEditor endpoint={`/api/pieces/${piece.id}/weaknesses/${weakness.id}`} value={weakness}
+              fields={[{ key: 'location', label: 'Location' }, { key: 'description', label: 'Description' }, { key: 'category', label: 'Category', options: ['PitchAccuracy', 'RhythmAndTempo', 'DynamicsAndBalance', 'Voicing', 'ArticulationAndPedal', 'PhrasingAndRubato', 'PhysicalTension'] }]}
+              onSaved={async () => { setWeaknesses(await api.getWeaknesses(piece.id)); await onRefresh?.(); }} />
+          </div>)}
+          {sessionTakes.map(take => <div key={take.id}>
+            Take #{take.takeNumber}
+            <RecordEditor endpoint={`/api/pieces/${piece.id}/sessions/${take.practiceSessionId}/takes/${take.id}`} value={take}
+              fields={[{ key: 'targetSection', label: 'Target section' }, { key: 'userSelfReflection', label: 'Reflection' }]}
+              onSaved={async () => { setSessionTakes(await api.getTakes(piece.id, take.practiceSessionId)); await onRefresh?.(); }} />
+          </div>)}
+        </div>
+      </details>
       {/* Piece Overview Hero Banner */}
       <div className="rounded-2xl bg-gradient-to-r from-[#111622] via-[#141A29] to-[#111622] border border-[#1E2638] p-6 shadow-xl shadow-black/40 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

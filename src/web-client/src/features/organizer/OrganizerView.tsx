@@ -1,4 +1,4 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { CreateTaskRequest, DayArchetype, TaskItem } from '../../types/cadence';
 import { DayArchetypeBanner } from './DayArchetypeBanner';
 import { TaskEntry } from './TaskEntry';
@@ -41,6 +41,7 @@ export const OrganizerView: FC<OrganizerViewProps> = ({
 }) => {
   const [layoutMode, setLayoutMode] = useState<'daily' | 'weekly'>('daily');
   const [filterMode, setFilterMode] = useState<'today' | 'all' | 'completed'>('today');
+  useEffect(() => { const refresh = () => { void onRefreshTasks(); }; window.addEventListener('cadence-record-updated', refresh); return () => window.removeEventListener('cadence-record-updated', refresh); }, [onRefreshTasks]);
   const todayStr = getTodayIsoDate();
 
   const filteredTasks = tasks.filter((t) => {

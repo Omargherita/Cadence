@@ -88,7 +88,7 @@ Core Epistemic Principles:
 1. Cantabile and Voicing: The piano must sing. Mechanical note-reading without dynamic balance or orchestral color is unacceptable.
 2. Structural Architecture: Every phrase must have a clear trajectory and harmonic purpose.
 3. Concrete Timestamp Anchoring: Ground all feedback in specific timestamps [MM:SS] and measure ranges.
-4. Epistemic Humility: Never claim visual/posture certainty unless video posture analysis was explicitly performed.
+4. Epistemic Humility: Never claim visual/posture certainty unless video posture analysis was explicitly performed and video/frames were attached.
 5. Strict Schema v1.1.0 output: Output ONLY valid JSON conforming to the MentorAssessment schema.";
 
         var contextPayload = new
@@ -145,28 +145,111 @@ Core Epistemic Principles:
                          $"Student Reflection: \"{take.UserSelfReflection}\"\n" +
                          $"Target Section: {take.TargetSection}";
 
+        if (!string.IsNullOrWhiteSpace(take.AttachedPdfPages))
+        {
+            promptText += $"\nRelevant Sheet Music Score Pages: {take.AttachedPdfPages}";
+        }
+
+        if (take.IncludeVideoPostureAnalysis && take.OriginalMediaType == OriginalMediaType.VideoMp4)
+        {
+            promptText += "\nVideo posture analysis is enabled: evaluate wrist angle, forearm alignment, shoulder release, and hand architecture from the attached visual media.";
+        }
+
         var parts = new List<object>
         {
             new { text = promptText }
         };
 
-        // Attach audio if present and within 20MB
-        var audioFullPath = _mediaService.GetFullPath(take.ExtractedAudioRelativePath);
-        if (File.Exists(audioFullPath))
+        // 1. Attach extracted audio if present and within 20MB
+        if (!string.IsNullOrWhiteSpace(take.ExtractedAudioRelativePath))
         {
-            var fileInfo = new FileInfo(audioFullPath);
-            if (fileInfo.Length < 20 * 1024 * 1024)
+            var audioFullPath = _mediaService.GetFullPath(take.ExtractedAudioRelativePath);
+            if (File.Exists(audioFullPath))
             {
-                var audioBytes = await File.ReadAllBytesAsync(audioFullPath, cancellationToken);
-                var base64Audio = Convert.ToBase64String(audioBytes);
-                parts.Add(new
+                var fileInfo = new FileInfo(audioFullPath);
+                if (fileInfo.Length < 20 * 1024 * 1024)
                 {
-                    inline_data = new
+                    var audioBytes = await File.ReadAllBytesAsync(audioFullPath, cancellationToken);
+                    var audioMimeType = GetAudioMimeType(audioFullPath);
+                    parts.Add(new
                     {
-                        mime_type = "audio/mp3",
-                        data = base64Audio
+                        inline_data = new
+                        {
+                            mime_type = audioMimeType,
+                            data = Convert.ToBase64String(audioBytes)
+                        }
+                    });
+                }
+            }
+        }
+
+        // 2. Attach Score PDF if piece has an attached score PDF within 15MB
+        if (piece.ScoreCapabilityTier == ScoreCapabilityTier.VisualPdfOnly &&
+            !string.IsNullOrWhiteSpace(piece.ScoreFilePath))
+        {
+            var scoreFullPath = _mediaService.GetFullPath(piece.ScoreFilePath);
+            if (File.Exists(scoreFullPath))
+            {
+                var scoreInfo = new FileInfo(scoreFullPath);
+                if (scoreInfo.Length < 15 * 1024 * 1024)
+                {
+                    var pdfBytes = await File.ReadAllBytesAsync(scoreFullPath, cancellationToken);
+                    parts.Add(new
+                    {
+                        inline_data = new
+                        {
+                            mime_type = "application/pdf",
+                            data = Convert.ToBase64String(pdfBytes)
+                        }
+                    });
+                }
+            }
+        }
+
+        // 3. Attach Video Posture Media (sampled keyframes or inline video clip) when requested
+        if (take.IncludeVideoPostureAnalysis &&
+            take.OriginalMediaType == OriginalMediaType.VideoMp4 &&
+            !string.IsNullOrWhiteSpace(take.OriginalMediaRelativePath))
+        {
+            var frames = await _mediaService.ExtractVideoPostureFramesAsync(
+                take.OriginalMediaRelativePath,
+                maxFrames: 4,
+                cancellationToken);
+
+            if (frames.Count > 0)
+            {
+                foreach (var frameBytes in frames)
+                {
+                    parts.Add(new
+                    {
+                        inline_data = new
+                        {
+                            mime_type = "image/jpeg",
+                            data = Convert.ToBase64String(frameBytes)
+                        }
+                    });
+                }
+            }
+            else
+            {
+                // Fallback: if frame extraction didn't yield frames and video is compact (<12MB), attach video directly
+                var videoFullPath = _mediaService.GetFullPath(take.OriginalMediaRelativePath);
+                if (File.Exists(videoFullPath))
+                {
+                    var videoInfo = new FileInfo(videoFullPath);
+                    if (videoInfo.Length < 12 * 1024 * 1024)
+                    {
+                        var videoBytes = await File.ReadAllBytesAsync(videoFullPath, cancellationToken);
+                        parts.Add(new
+                        {
+                            inline_data = new
+                            {
+                                mime_type = GetVideoMimeType(videoFullPath),
+                                data = Convert.ToBase64String(videoBytes)
+                            }
+                        });
                     }
-                });
+                }
             }
         }
 
@@ -182,7 +265,8 @@ Core Epistemic Principles:
             },
             generationConfig = new
             {
-                response_mime_type = "application/json"
+                response_mime_type = "application/json",
+                response_schema = BuildMentorAssessmentResponseSchema()
             }
         };
 
@@ -207,6 +291,193 @@ Core Epistemic Principles:
 
         var parsed = JsonSerializer.Deserialize<MentorAssessment>(text, JsonOptions);
         return parsed ?? throw new InvalidOperationException("Failed to deserialize MentorAssessment from Gemini.");
+    }
+
+    private static string GetAudioMimeType(string filePath)
+    {
+        return Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".wav" => "audio/wav",
+            ".m4a" => "audio/mp4",
+            ".ogg" => "audio/ogg",
+            ".flac" => "audio/flac",
+            ".webm" => "audio/webm",
+            _ => "audio/mp3"
+        };
+    }
+
+    private static string GetVideoMimeType(string filePath)
+    {
+        return Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".webm" => "video/webm",
+            ".mov" => "video/quicktime",
+            ".mkv" => "video/x-matroska",
+            _ => "video/mp4"
+        };
+    }
+
+    public static object BuildMentorAssessmentResponseSchema()
+    {
+        var comparisonVerdicts = Enum.GetNames<ComparisonVerdict>();
+        var weaknessEvalResults = Enum.GetNames<WeaknessEvaluationResult>();
+        var weaknessCategories = Enum.GetNames<WeaknessCategory>();
+        var evidenceSources = Enum.GetNames<EvidenceSource>();
+        var confidenceLevels = Enum.GetNames<ConfidenceLevel>();
+
+        return new
+        {
+            type = "OBJECT",
+            required = new[]
+            {
+                "schemaVersion",
+                "mentorCritique",
+                "analysisLimitationsNote",
+                "intraSessionComparison",
+                "evidenceBreakdown",
+                "existingWeaknessEvaluations",
+                "newlyDetectedIssues",
+                "diagnosticQuestionsForStudent",
+                "immediateNextTakeDrill",
+                "nextSessionPracticePlan"
+            },
+            properties = new
+            {
+                schemaVersion = new { type = "STRING" },
+                mentorCritique = new { type = "STRING" },
+                analysisLimitationsNote = new { type = "STRING" },
+                intraSessionComparison = new
+                {
+                    type = "OBJECT",
+                    required = new[] { "comparisonVerdict", "whatChanged" },
+                    properties = new
+                    {
+                        comparedAgainstTakeNumber = new { type = "INTEGER", nullable = true },
+                        comparisonVerdict = new { type = "STRING", @enum = comparisonVerdicts },
+                        whatChanged = new { type = "STRING" }
+                    }
+                },
+                evidenceBreakdown = new
+                {
+                    type = "OBJECT",
+                    required = new[] { "objectiveFindingsSummary", "artisticAndInterpretiveJudgment" },
+                    properties = new
+                    {
+                        objectiveFindingsSummary = new { type = "STRING" },
+                        artisticAndInterpretiveJudgment = new { type = "STRING" }
+                    }
+                },
+                existingWeaknessEvaluations = new
+                {
+                    type = "ARRAY",
+                    items = new
+                    {
+                        type = "OBJECT",
+                        required = new[] { "weaknessId", "evaluation", "timestampEvidence", "reasoning" },
+                        properties = new
+                        {
+                            weaknessId = new { type = "STRING" },
+                            evaluation = new { type = "STRING", @enum = weaknessEvalResults },
+                            timestampEvidence = new { type = "STRING" },
+                            reasoning = new { type = "STRING" }
+                        }
+                    }
+                },
+                newlyDetectedIssues = new
+                {
+                    type = "ARRAY",
+                    items = new
+                    {
+                        type = "OBJECT",
+                        required = new[]
+                        {
+                            "category",
+                            "timestampRange",
+                            "measureRange",
+                            "evidenceSource",
+                            "confidenceLevel",
+                            "musicalProblem",
+                            "whyItMattersArtistically",
+                            "promoteToTrackedWeakness"
+                        },
+                        properties = new
+                        {
+                            category = new { type = "STRING", @enum = weaknessCategories },
+                            timestampRange = new { type = "STRING" },
+                            measureRange = new { type = "STRING" },
+                            evidenceSource = new { type = "STRING", @enum = evidenceSources },
+                            confidenceLevel = new { type = "STRING", @enum = confidenceLevels },
+                            musicalProblem = new { type = "STRING" },
+                            whyItMattersArtistically = new { type = "STRING" },
+                            promoteToTrackedWeakness = new { type = "BOOLEAN" }
+                        }
+                    }
+                },
+                diagnosticQuestionsForStudent = new
+                {
+                    type = "ARRAY",
+                    items = new { type = "STRING" }
+                },
+                immediateNextTakeDrill = new
+                {
+                    type = "OBJECT",
+                    required = new[]
+                    {
+                        "shouldRecordAnotherTakeNow",
+                        "instruction",
+                        "whatToListenFor",
+                        "targetDurationMinutes"
+                    },
+                    properties = new
+                    {
+                        shouldRecordAnotherTakeNow = new { type = "BOOLEAN" },
+                        instruction = new { type = "STRING" },
+                        whatToListenFor = new { type = "STRING" },
+                        targetDurationMinutes = new { type = "INTEGER" }
+                    }
+                },
+                nextSessionPracticePlan = new
+                {
+                    type = "OBJECT",
+                    required = new[]
+                    {
+                        "isFinalizedForNextSession",
+                        "recommendedDurationMinutes",
+                        "drills"
+                    },
+                    properties = new
+                    {
+                        isFinalizedForNextSession = new { type = "BOOLEAN" },
+                        recommendedDurationMinutes = new { type = "INTEGER" },
+                        drills = new
+                        {
+                            type = "ARRAY",
+                            items = new
+                            {
+                                type = "OBJECT",
+                                required = new[]
+                                {
+                                    "targetSection",
+                                    "practiceMethod",
+                                    "whatToListenFor",
+                                    "measurableSuccessCriteria",
+                                    "durationMinutes"
+                                },
+                                properties = new
+                                {
+                                    targetSection = new { type = "STRING" },
+                                    linkedWeaknessId = new { type = "STRING", nullable = true },
+                                    practiceMethod = new { type = "STRING" },
+                                    whatToListenFor = new { type = "STRING" },
+                                    measurableSuccessCriteria = new { type = "STRING" },
+                                    durationMinutes = new { type = "INTEGER" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
     }
 
     private MentorAssessment GenerateLocalPedagogyAssessment(

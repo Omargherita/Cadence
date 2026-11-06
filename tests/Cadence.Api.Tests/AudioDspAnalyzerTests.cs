@@ -164,4 +164,184 @@ public class AudioDspAnalyzerTests
         Assert.Contains("22.1 dB", assessment.EvidenceBreakdown.ObjectiveFindingsSummary);
         Assert.Contains("Dragging tendency at 00:00-00:05", assessment.EvidenceBreakdown.ObjectiveFindingsSummary);
     }
+
+    [Fact]
+    public async Task PianoMentorService_CallGeminiAsync_SendsResponseSchemaAndMultimodalMediaParts()
+    {
+        // Arrange
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"cadence_test_media_{Guid.NewGuid():N}");
+        var paths = new CadenceStoragePaths(tempRoot);
+        paths.EnsureDirectoriesCreated();
+
+        try
+        {
+            var pieceId = Guid.CreateVersion7();
+            var sessionId = Guid.CreateVersion7();
+
+            var fakeMediaService = new FakePostureMediaService(paths);
+
+            // Create a dummy score PDF and dummy WAV audio file in the media directory
+            var scoreRelPath = $"pieces/{pieceId}/scores/score.pdf";
+            var scoreFullPath = fakeMediaService.GetFullPath(scoreRelPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(scoreFullPath)!);
+            await File.WriteAllBytesAsync(scoreFullPath, [0x25, 0x50, 0x44, 0x46]); // %PDF
+
+            var audioRelPath = $"pieces/{pieceId}/sessions/{sessionId}/take_1_orig.wav";
+            var audioFullPath = fakeMediaService.GetFullPath(audioRelPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(audioFullPath)!);
+            CreateSyntheticWavFile(audioFullPath, 24000, 1.0);
+
+            var videoRelPath = $"pieces/{pieceId}/sessions/{sessionId}/take_1_orig.mp4";
+            var videoFullPath = fakeMediaService.GetFullPath(videoRelPath);
+            await File.WriteAllBytesAsync(videoFullPath, [0x00, 0x00, 0x00, 0x18]);
+
+            string? capturedRequestBody = null;
+            var handler = new CapturingHttpMessageHandler(reqBody =>
+            {
+                capturedRequestBody = reqBody;
+                var fakeAssessment = new MentorAssessment
+                {
+                    SchemaVersion = "1.1.0",
+                    MentorCritique = "Live multimodal critique with posture and score context.",
+                    AnalysisLimitationsNote = "Full multimodal analysis.",
+                    IntraSessionComparison = new IntraSessionComparison
+                    {
+                        ComparisonVerdict = ComparisonVerdict.FirstTakeInSession,
+                        WhatChanged = "Baseline"
+                    },
+                    EvidenceBreakdown = new EvidenceBreakdown
+                    {
+                        ObjectiveFindingsSummary = "Steady tempo",
+                        ArtisticAndInterpretiveJudgment = "Singing tone"
+                    }
+                };
+                var fakeGeminiResponse = new
+                {
+                    candidates = new[]
+                    {
+                        new
+                        {
+                            content = new
+                            {
+                                parts = new[]
+                                {
+                                    new { text = JsonSerializer.Serialize(fakeAssessment) }
+                                }
+                            }
+                        }
+                    }
+                };
+                return JsonSerializer.Serialize(fakeGeminiResponse);
+            });
+
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["GEMINI_API_KEY"] = "test-api-key"
+                })
+                .Build();
+
+            var mentorService = new PianoMentorService(
+                config,
+                fakeMediaService,
+                new HttpClient(handler),
+                NullLogger<PianoMentorService>.Instance);
+
+            var piece = new Piece
+            {
+                Id = pieceId,
+                Title = "Ballade No. 1",
+                Composer = "Chopin",
+                ScoreCapabilityTier = ScoreCapabilityTier.VisualPdfOnly,
+                ScoreFilePath = scoreRelPath
+            };
+
+            var session = new PracticeSession
+            {
+                Id = sessionId,
+                PieceId = pieceId,
+                StartedAtUtc = DateTimeOffset.UtcNow,
+                DurationMinutes = 30
+            };
+
+            var take = new PracticeTake
+            {
+                Id = Guid.CreateVersion7(),
+                PracticeSessionId = sessionId,
+                TakeNumber = 1,
+                TargetSection = "Measures 1-8",
+                AttachedPdfPages = "1-2",
+                IncludeVideoPostureAnalysis = true,
+                OriginalMediaType = OriginalMediaType.VideoMp4,
+                OriginalMediaRelativePath = videoRelPath,
+                ExtractedAudioRelativePath = audioRelPath
+            };
+
+            // Act
+            var assessment = await mentorService.AssessTakeAsync(piece, session, take);
+
+            // Assert
+            Assert.NotNull(assessment);
+            Assert.Equal("Live multimodal critique with posture and score context.", assessment.MentorCritique);
+            Assert.NotNull(capturedRequestBody);
+
+            using var doc = JsonDocument.Parse(capturedRequestBody!);
+            var genConfig = doc.RootElement.GetProperty("generationConfig");
+            Assert.Equal("application/json", genConfig.GetProperty("response_mime_type").GetString());
+            Assert.True(genConfig.TryGetProperty("response_schema", out var schemaElem));
+            Assert.Equal("OBJECT", schemaElem.GetProperty("type").GetString());
+
+            var parts = doc.RootElement
+                .GetProperty("contents")[0]
+                .GetProperty("parts")
+                .EnumerateArray()
+                .ToList();
+
+            // Expect: 1 text prompt + 1 audio/wav + 1 application/pdf + 2 image/jpeg posture frames = 5 parts
+            Assert.Equal(5, parts.Count);
+
+            var mimeTypes = parts
+                .Where(p => p.TryGetProperty("inline_data", out _))
+                .Select(p => p.GetProperty("inline_data").GetProperty("mime_type").GetString())
+                .ToList();
+
+            Assert.Contains("audio/wav", mimeTypes);
+            Assert.Contains("application/pdf", mimeTypes);
+            Assert.Equal(2, mimeTypes.Count(m => m == "image/jpeg"));
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    private sealed class FakePostureMediaService(CadenceStoragePaths paths)
+        : MediaProcessingService(paths, NullLogger<MediaProcessingService>.Instance)
+    {
+        public override Task<IReadOnlyList<byte[]>> ExtractVideoPostureFramesAsync(
+            string videoRelativePath,
+            int maxFrames = 4,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<byte[]>>([[0xFF, 0xD8, 0xFF], [0xFF, 0xD8, 0xFF]]);
+        }
+    }
+
+    private sealed class CapturingHttpMessageHandler(Func<string, string> responder) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content != null
+                ? await request.Content.ReadAsStringAsync(cancellationToken)
+                : string.Empty;
+            var responseJson = responder(body);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseJson, System.Text.Encoding.UTF8, "application/json")
+            };
+        }
+    }
 }

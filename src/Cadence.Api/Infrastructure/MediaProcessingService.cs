@@ -14,6 +14,10 @@ public interface IMediaProcessingService
         string originalFileName,
         Stream fileStream,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<byte[]>> ExtractVideoPostureFramesAsync(
+        string videoRelativePath,
+        int maxFrames = 4,
+        CancellationToken cancellationToken = default);
     string GetFullPath(string relativePath);
     bool FileExists(string relativePath);
 }
@@ -99,16 +103,26 @@ public class MediaProcessingService : IMediaProcessingService
         }
 
         string extractedAudioRelativePath;
-        if (isVideo)
+        if (isVideo || ext != ".mp3")
         {
             extractedAudioRelativePath = Path.Combine(relativeDir, $"take_{takeNumber}_audio.mp3").Replace('\\', '/');
             var extractedAudioAbsolutePath = GetFullPath(extractedAudioRelativePath);
 
-            await ExtractAudioWithFfmpegAsync(origAbsolutePath, extractedAudioAbsolutePath, cancellationToken);
+            try
+            {
+                await ExtractAudioWithFfmpegAsync(origAbsolutePath, extractedAudioAbsolutePath, cancellationToken);
+            }
+            catch (Exception ex) when (!isVideo)
+            {
+                // For non-MP3 audio files (e.g., .wav) where FFmpeg might not be installed in a minimal environment,
+                // fall back gracefully to the original audio file so DSP (soundfile) and playback still work.
+                _logger.LogWarning(ex, "FFmpeg transcode of audio {Ext} failed; falling back to original audio file.", ext);
+                extractedAudioRelativePath = origRelativePath;
+            }
         }
         else
         {
-            // If already MP3/audio, use the uploaded audio as the extracted audio path
+            // Already an MP3 audio file
             extractedAudioRelativePath = origRelativePath;
         }
 
@@ -121,6 +135,82 @@ public class MediaProcessingService : IMediaProcessingService
             mediaType,
             durationSeconds
         );
+    }
+
+    public virtual async Task<IReadOnlyList<byte[]>> ExtractVideoPostureFramesAsync(
+        string videoRelativePath,
+        int maxFrames = 4,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(videoRelativePath) || maxFrames <= 0)
+        {
+            return [];
+        }
+
+        var videoFullPath = GetFullPath(videoRelativePath);
+        if (!File.Exists(videoFullPath))
+        {
+            return [];
+        }
+
+        var duration = await ProbeDurationSecondsAsync(videoFullPath, cancellationToken) ?? 12.0;
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cadence_frames_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var interval = Math.Max(1.0, duration / (maxFrames + 1));
+            var frames = new List<byte[]>(maxFrames);
+
+            for (int i = 1; i <= maxFrames; i++)
+            {
+                var timestampSec = Math.Min(Math.Max(0.0, duration - 0.2), i * interval);
+                var framePath = Path.Combine(tempDir, $"frame_{i}.jpg");
+                var tsFormatted = timestampSec.ToString("F2", CultureInfo.InvariantCulture);
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = $"-y -ss {tsFormatted} -i \"{videoFullPath}\" -frames:v 1 -vf \"scale='min(1280,iw)':-2\" -q:v 4 \"{framePath}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = new Process { StartInfo = startInfo };
+                process.Start();
+                var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+                await process.WaitForExitAsync(cancellationToken);
+                await stderrTask;
+
+                if (process.ExitCode == 0 && File.Exists(framePath))
+                {
+                    frames.Add(await File.ReadAllBytesAsync(framePath, cancellationToken));
+                }
+            }
+
+            return frames;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not extract video posture frames for {VideoPath}", videoFullPath);
+            return [];
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                }
+            }
+            catch
+            {
+                // Ignored
+            }
+        }
     }
 
     private async Task ExtractAudioWithFfmpegAsync(string inputPath, string outputMp3Path, CancellationToken cancellationToken)

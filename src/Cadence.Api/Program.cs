@@ -4,6 +4,7 @@ using Cadence.Api.Features.Organizer;
 using Cadence.Api.Features.PianoMentor;
 using Cadence.Api.Features.System;
 using Cadence.Api.Infrastructure;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 
 var baseDir = AppContext.BaseDirectory;
@@ -20,6 +21,17 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
     WebRootPath = resolvedWebRoot
+});
+
+// Configure Upload Size Limits (up to 500 MB for HD practice video takes & score PDFs)
+const long maxUploadBytes = 500L * 1024 * 1024;
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = maxUploadBytes;
+});
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxUploadBytes;
 });
 
 // Configure Storage Paths and Directories

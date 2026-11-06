@@ -52,7 +52,9 @@ public static class PianoMentorEndpoints
                 scoreCapabilityTier = piece.ScoreCapabilityTier,
                 scoreFilePath = piece.ScoreFilePath
             });
-        }).DisableAntiforgery();
+        })
+        .DisableAntiforgery()
+        .WithMetadata(new DisableRequestSizeLimitAttribute());
 
         // 2. Stream PDF Score
         group.MapGet("/{pieceId:guid}/score", async (
@@ -234,7 +236,9 @@ public static class PianoMentorEndpoints
             await db.SaveChangesAsync(ct);
 
             return Results.Created($"/api/pieces/{pieceId}/sessions/{sessionId}/takes/{take.Id}", take);
-        }).DisableAntiforgery();
+        })
+        .DisableAntiforgery()
+        .WithMetadata(new DisableRequestSizeLimitAttribute());
 
         // 6. Get Takes for a Session
         group.MapGet("/{pieceId:guid}/sessions/{sessionId:guid}/takes", async (
@@ -274,7 +278,14 @@ public static class PianoMentorEndpoints
                 var contentType = ext switch
                 {
                     ".mp4" => "video/mp4",
+                    ".webm" => "video/webm",
+                    ".mov" => "video/quicktime",
+                    ".mkv" => "video/x-matroska",
                     ".mp3" => "audio/mpeg",
+                    ".wav" => "audio/wav",
+                    ".m4a" => "audio/mp4",
+                    ".ogg" => "audio/ogg",
+                    ".flac" => "audio/flac",
                     ".pdf" => "application/pdf",
                     ".png" => "image/png",
                     ".jpg" or ".jpeg" => "image/jpeg",

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Header } from './components/Header';
+import { Header, Horizon } from './components/Header';
 import { OrganizerView } from './features/organizer/OrganizerView';
 import { MusicalLibraryView } from './features/music/MusicalLibraryView';
 import {
@@ -16,6 +16,7 @@ import { syncEngine, SyncEngineStatus } from './services/syncEngine';
 
 export function App() {
   const [activeView, setActiveView] = useState<'organizer' | 'library'>('organizer');
+  const [horizon, setHorizon] = useState<Horizon>('today');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -198,9 +199,12 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0E14] text-[#F0F4F8] flex flex-col font-sans selection:bg-blue-600/30 selection:text-white">
+    <div className="cadence-app min-h-screen bg-[#0B0E14] text-[#F0F4F8] flex flex-col font-sans selection:bg-blue-600/30 selection:text-white">
       {/* Top Application Header */}
       <Header
+        horizon={horizon} onHorizon={setHorizon} pieces={pieces} selectedPieceId={selectedPieceId}
+        onPiece={id => { setActiveView('library'); setSelectedPieceId(id); }}
+        archetype={selectedArchetype} onArchetype={handleSelectArchetype}
         activeView={activeView}
         onSelectView={(v) => {
           setActiveView(v);
@@ -213,7 +217,7 @@ export function App() {
       />
 
       {/* Main Content Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="app-canvas">
         {activeView === 'organizer' ? (
           <OrganizerView
             tasks={tasks}

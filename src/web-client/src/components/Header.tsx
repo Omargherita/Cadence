@@ -1,170 +1,40 @@
-import { FC, useState } from 'react';
-import { Activity, CheckSquare, Music, ShieldCheck, Database, RefreshCw, CloudOff } from 'lucide-react';
+import { useState } from 'react';
+import { CalendarDays, CalendarRange, Inbox, CheckCheck, Library, Menu, X, RefreshCw, Database } from 'lucide-react';
 import { api } from '../services/api';
-
+import { DAY_ARCHETYPES, DayArchetype, Piece } from '../types/cadence';
+export type Horizon = 'today' | 'weekly' | 'unscheduled' | 'completed' | 'all';
 interface HeaderProps {
-  activeView: 'organizer' | 'library';
-  onSelectView: (view: 'organizer' | 'library') => void;
-  isOnline: boolean;
-  pendingOutboxCount: number;
-  isSyncing: boolean;
-  onSyncNow: () => Promise<void>;
+  activeView: 'organizer' | 'library'; onSelectView: (view: 'organizer' | 'library') => void;
+  isOnline: boolean; pendingOutboxCount: number; isSyncing: boolean; onSyncNow: () => Promise<void>;
+  horizon: Horizon; onHorizon: (horizon: Horizon) => void; pieces: Piece[]; onPiece: (id: string) => void;
+  selectedPieceId: string | null; archetype: DayArchetype; onArchetype: (value: DayArchetype) => void;
 }
-
-export const Header: FC<HeaderProps> = ({
-  activeView,
-  onSelectView,
-  isOnline,
-  pendingOutboxCount,
-  isSyncing,
-  onSyncNow,
-}) => {
-  const [isBackingUp, setIsBackingUp] = useState(false);
-  const [backupMessage, setBackupMessage] = useState<string | null>(null);
-
-  const handleBackup = async () => {
-    try {
-      setIsBackingUp(true);
-      const res = await api.triggerBackup();
-      const filename = res.backupPath.split('/').pop();
-      setBackupMessage(`Saved: ${filename}`);
-      setTimeout(() => setBackupMessage(null), 4000);
-    } catch {
-      setBackupMessage('Backup failed');
-      setTimeout(() => setBackupMessage(null), 3000);
-    } finally {
-      setIsBackingUp(false);
-    }
-  };
-
-  return (
-    <header className="sticky top-0 z-30 border-b border-[#1E2638] bg-[#0B0E14]/90 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Brand Logo & Connection/Outbox Indicator */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-lg shadow-blue-500/10 shrink-0">
-              <Activity className="w-5 h-5" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-lg font-bold tracking-tight text-[#F0F4F8]">
-                Cadence
-              </span>
-              <span className="text-[10px] tracking-wider uppercase font-semibold text-slate-400">
-                Personal Monolith
-              </span>
-            </div>
-
-            {/* Connection Status & Outbox Indicator */}
-            <div className="hidden sm:flex items-center gap-2 ml-2">
-              {/* Primary Online/Offline Pill */}
-              <div
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                  isOnline
-                    ? 'bg-blue-950/60 text-blue-400 border-blue-800/60'
-                    : 'bg-slate-900 text-slate-400 border-slate-700/60'
-                }`}
-                title={isOnline ? 'Connected to local backend' : 'Backend offline (Serving from Dexie IndexedDB)'}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    isOnline ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'
-                  }`}
-                />
-                <span className="text-[11px] font-mono tracking-tight">
-                  {isOnline ? 'Online' : 'Offline'}
-                </span>
-              </div>
-
-              {/* Pending Outbox Queue Pill */}
-              {pendingOutboxCount > 0 && (
-                isOnline ? (
-                  <button
-                    onClick={onSyncNow}
-                    disabled={isSyncing}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 border border-blue-700/70 transition-all cursor-pointer shadow-sm"
-                    title="Click to sync outbox changes immediately"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-blue-400' : 'text-blue-400'}`} />
-                    <span>{isSyncing ? 'Syncing...' : `Sync Now (${pendingOutboxCount})`}</span>
-                  </button>
-                ) : (
-                  <div
-                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-950/60 text-amber-300 border border-amber-800/60"
-                    title="Offline mutations queued in Dexie IndexedDB"
-                  >
-                    <CloudOff className="w-3 h-3 text-amber-400" />
-                    <span>Offline — {pendingOutboxCount} queued</span>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-
-          {/* Navigation Tabs */}
-          <nav className="flex items-center gap-1 bg-[#111622] p-1 rounded-xl border border-[#1E2638]">
-            <button
-              onClick={() => onSelectView('organizer')}
-              className={`flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer ${
-                activeView === 'organizer'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                  : 'text-slate-400 hover:text-[#F0F4F8] hover:bg-[#1A202C]'
-              }`}
-            >
-              <CheckSquare className="w-4 h-4" />
-              <span>Organizer</span>
-            </button>
-            <button
-              onClick={() => onSelectView('library')}
-              className={`flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer ${
-                activeView === 'library'
-                  ? 'bg-violet-600 text-white shadow-md shadow-violet-600/20'
-                  : 'text-slate-400 hover:text-[#F0F4F8] hover:bg-[#1A202C]'
-              }`}
-            >
-              <Music className="w-4 h-4" />
-              <span>Musical Library</span>
-            </button>
-          </nav>
-
-          {/* System Backup Action */}
-          <div className="flex items-center gap-2">
-            {backupMessage && (
-              <span className="hidden md:inline-flex items-center gap-1 text-xs font-mono px-2 py-1 rounded bg-[#111622] text-amber-300 border border-amber-800/60">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                {backupMessage}
-              </span>
-            )}
-            <button
-              onClick={handleBackup}
-              disabled={isBackingUp || !isOnline}
-              title="Trigger live SQLite backup (VACUUM INTO)"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#111622] hover:bg-[#1A202C] text-slate-300 hover:text-white border border-[#1E2638] transition-colors disabled:opacity-50 cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden sm:inline">Backup DB</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Mobile-only outbox warning bar */}
-        {pendingOutboxCount > 0 && (
-          <div className="sm:hidden pb-2 flex items-center justify-between text-xs font-mono">
-            <span className="text-amber-300">
-              {isOnline ? `${pendingOutboxCount} changes pending sync` : `Offline — ${pendingOutboxCount} queued`}
-            </span>
-            {isOnline && (
-              <button
-                onClick={onSyncNow}
-                disabled={isSyncing}
-                className="text-blue-400 underline font-semibold cursor-pointer"
-              >
-                {isSyncing ? 'Syncing...' : 'Sync Now'}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </header>
-  );
-};
+export function Header(p: HeaderProps) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const navigate = (action: () => void) => { action(); setOpen(false); };
+  async function backup() { setBusy(true); try { const result = await api.triggerBackup(); setMessage(`Backup saved: ${result.backupPath.split('/').pop()}`); } catch { setMessage('Backup failed. Check the host connection and try again.'); } finally { setBusy(false); } }
+  const items = [['today', 'Today', CalendarDays], ['weekly', 'Weekly', CalendarRange], ['unscheduled', 'Unscheduled', Inbox], ['completed', 'Logbook', CheckCheck], ['all', 'All tasks', Inbox]] as const;
+  return <>
+    {open && <button className="nav-backdrop" aria-label="Close navigation" onClick={() => setOpen(false)} />}
+    <aside className={`app-sidebar ${open ? 'is-open' : ''}`} aria-label="Main navigation">
+      <div className="wordmark"><span className="cadence-mark" aria-hidden="true">Ⅱ</span> Cadence <button className="mobile-only icon-button" aria-label="Close navigation" onClick={() => setOpen(false)}><X size={18}/></button></div>
+      <nav><p className="nav-section">Organizer</p>
+        {items.map(([key,label,Icon]) => <button key={key} aria-current={p.activeView === 'organizer' && p.horizon === key ? 'page' : undefined} onClick={() => navigate(() => { p.onHorizon(key); p.onSelectView('organizer'); })}><Icon size={16}/>{label}</button>)}
+        <p className="nav-section">Studio</p>
+        <button aria-current={p.activeView === 'library' && !p.selectedPieceId ? 'page' : undefined} onClick={() => navigate(() => p.onSelectView('library'))}><Library size={16}/>All repertoire</button>
+        <p className="nav-section">Main challenge</p>
+        {p.pieces.filter(piece => piece.bucket === 'MainChallenge').map(piece => <button key={piece.id} aria-current={p.activeView === 'library' && p.selectedPieceId === piece.id ? 'page' : undefined} onClick={() => navigate(() => p.onPiece(piece.id))}><span className="status-ring violet"/ ><span className="truncate">{piece.title}</span></button>)}
+        {!p.pieces.some(piece => piece.bucket === 'MainChallenge') && <p className="nav-empty">Your focus pieces will appear here.</p>}
+      </nav>
+      <footer className="sidebar-footer"><label htmlFor="day-structure">Day structure</label><select id="day-structure" value={p.archetype} onChange={e => p.onArchetype(e.target.value as DayArchetype)}>{DAY_ARCHETYPES.map(a => <option key={a.type} value={a.type}>{a.label}</option>)}</select>
+        <p className="secondary">{DAY_ARCHETYPES.find(a => a.type === p.archetype)?.pianoTarget}</p>
+        <div className="system-row"><span className={p.isOnline ? 'secondary' : 'attention'}>{p.isOnline ? '● Connected' : '○ Offline'}</span><button disabled={busy || !p.isOnline} onClick={backup} title="Create database backup"><Database size={14}/>{busy ? 'Saving…' : 'Backup'}</button></div>
+        {p.pendingOutboxCount > 0 && <button disabled={!p.isOnline || p.isSyncing} onClick={p.onSyncNow}><RefreshCw size={14}/>{p.isSyncing ? 'Syncing…' : `${p.pendingOutboxCount} queued · Sync now`}</button>}
+        <p role="status" className="system-message">{message}</p>
+      </footer>
+    </aside>
+    <header className="context-bar"><button className="mobile-only icon-button" aria-label="Open navigation" aria-expanded={open} onClick={() => setOpen(true)}><Menu size={18}/></button><span>{p.activeView === 'organizer' ? 'Organizer' : 'Repertoire'}</span><span className="secondary">/</span><span className="truncate">{p.activeView === 'organizer' ? items.find(i => i[0] === p.horizon)?.[1] : p.pieces.find(piece => piece.id === p.selectedPieceId)?.title || 'All pieces'}</span></header>
+  </>;
+}

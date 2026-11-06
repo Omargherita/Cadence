@@ -41,7 +41,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
     if (player) {
       player.currentTime = Math.max(0, seconds);
       player.play().catch(() => {
-        // Auto-play could be blocked if un-interacted
+        // Au could be blocked if un-interacted
       });
     }
   };
@@ -54,19 +54,19 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
   };
 
   return (
-    <div className={`rounded-2xl bg-[#111622] border transition-all shadow-lg shadow-black/40 overflow-hidden ${
+    <div className={`rounded-lg bg-[#111622] border transition-all   overflow-hidden ${
       isLatest ? 'border-violet-600/60 ring-1 ring-violet-500/20' : 'border-[#1E2638]'
     }`}>
       {/* Take Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 bg-gradient-to-r from-[#141A29] to-[#111622] border-b border-[#1E2638]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5    border-b border-[#1E2638]">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#0B0E14] border border-[#1E2638] font-mono font-bold text-sm text-white">
+          <div className="flex items-center justify-center w-9 h-9 rounded-md bg-[#0B0E14] border border-[#1E2638] font-mono font-semibold text-sm text-white">
             #{take.takeNumber}
           </div>
 
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border ${
+              <span className={`px-2 py-0.5 rounded-md text-xs font-mono font-semibold border ${
                 take.scope === 'FullPerformance'
                   ? 'bg-blue-950/60 text-blue-300 border-blue-800/60'
                   : 'bg-violet-950/60 text-violet-300 border-violet-800/60'
@@ -75,14 +75,14 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
               </span>
 
               {take.includeVideoPostureAnalysis && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-violet-300 bg-violet-950/40 border border-violet-800/50">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono text-violet-300 bg-violet-950/40 border border-violet-800/50">
                   <Camera className="w-3 h-3 text-violet-400" />
                   <span>Posture Active</span>
                 </span>
               )}
 
               {take.durationSeconds && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-400">
+                <span className="inline-flex items-center gap-1 text-xs font-mono text-slate-400">
                   <Clock className="w-3 h-3" />
                   {formatDuration(take.durationSeconds)}
                 </span>
@@ -93,7 +93,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
               <span className="text-xs font-semibold text-[#F0F4F8]">
                 {take.targetSection ? `Section: ${take.targetSection}` : 'Entire Work'}
               </span>
-              <span className="text-[11px] font-mono text-slate-400">
+              <span className="text-xs font-mono text-slate-400">
                 • {formatRelativeTime(take.createdAtUtc)}
               </span>
             </div>
@@ -106,7 +106,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
             <button
               type="button"
               onClick={() => setIsAssessmentOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#0B0E14] hover:bg-[#1A202C] text-slate-300 hover:text-white border border-[#1E2638] transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#0B0E14] hover:bg-[#1A202C] text-slate-300 hover:text-white border border-[#1E2638] transition-colors cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-400" />
               <span>{isAssessmentOpen ? 'Hide Assessment' : 'Show Assessment'}</span>
@@ -122,7 +122,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
 
       <div className="p-4 sm:p-5 space-y-4">
         {/* Media Player Container */}
-        <div className="rounded-xl bg-[#0B0E14] border border-[#1E2638] p-3 sm:p-4 space-y-3">
+        <div className="document-section     p-3 sm:p-4 space-y-3">
           <div className="flex items-center justify-between text-xs font-mono text-slate-400 pb-2 border-b border-[#1E2638]/60">
             <div className="flex items-center gap-2">
               {isVideo ? (
@@ -130,11 +130,11 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
               ) : (
                 <Headphones className="w-4 h-4 text-blue-400" />
               )}
-              <span className="text-[#F0F4F8] font-bold">
+              <span className="text-[#F0F4F8] font-semibold">
                 {isVideo ? 'Master Video Stream' : 'Acoustic Audio Stream'}
               </span>
             </div>
-            <span className="text-[10px] uppercase tracking-wider text-slate-400">
+            <span className="text-xs   text-slate-400">
               HTTP Range Streaming
             </span>
           </div>
@@ -146,7 +146,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
               playsInline
               preload="metadata"
               src={mediaUrl}
-              className="w-full rounded-lg bg-black max-h-[420px] object-contain shadow-inner"
+              className="w-full rounded-lg bg-black max-h-[420px] object-contain "
             />
           ) : (
             <div className="pt-2">
@@ -163,7 +163,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
           {/* Metadata Badges & Notes */}
           <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
             {take.attachedPdfPages && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-mono text-blue-300 bg-blue-950/40 border border-blue-800/50 px-2 py-0.5 rounded">
+              <span className="inline-flex items-center gap-1 text-xs font-mono text-blue-300 bg-blue-950/40 border border-blue-800/50 px-2 py-0.5 rounded">
                 <FileText className="w-3 h-3 text-blue-400" />
                 <span>Score: {take.attachedPdfPages}</span>
               </span>
@@ -193,7 +193,7 @@ export const TakePlayerCard: FC<TakePlayerCardProps> = ({
             </div>
           )
         ) : (
-          <div className="rounded-xl bg-[#0B0E14] border border-[#1E2638] p-4 text-center text-xs text-slate-400 font-mono">
+          <div className="document-section     p-4 text-center text-xs text-slate-400 font-mono">
             AI Mentor Assessment was not attached to this take or backend analysis failed.
           </div>
         )}

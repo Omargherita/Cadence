@@ -291,6 +291,191 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
         onAddWeakness={handleAddWeakness}
       />
 
+      <details className="session-log" open={piece.sessions.length === 0}><summary>Log a practice session</summary>
+      {/* Log Practice Session & Legacy History Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Form: Log Practice Session */}
+        <div className="document-section lg:col-span-5     p-5   space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#1E2638]">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-violet-950/70 text-violet-400 border border-violet-800/60">
+                <Zap className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-semibold text-[#F0F4F8] tracking-tight">
+                Log practice session
+              </h3>
+            </div>
+            <span className="text-xs font-mono text-slate-400">Saved across your devices</span>
+          </div>
+
+          <form onSubmit={handleSubmitSession} className="space-y-4 text-xs">
+            {/* Duration Selector */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-400 font-mono text-xs  ">
+                Session Duration
+              </label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {DURATION_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setDuration(preset)}
+                    className={`px-3 py-1.5 rounded-lg font-mono text-xs transition-all cursor-pointer ${
+                      duration === preset
+                        ? 'bg-[#1E2638] text-white font-semibold ring-1 ring-blue-400 '
+                        : 'bg-[#0B0E14] text-slate-400 border border-[#1E2638] hover:bg-[#1A202C]'
+                    }`}
+                  >
+                    {preset}m
+                  </button>
+                ))}
+                <div className="flex items-center gap-1 bg-[#0B0E14] border border-[#1E2638] rounded-lg px-2 py-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="600"
+                    value={duration}
+                    onChange={(e) => setDuration(parseInt(e.target.value) || 0)}
+                    className="w-12 bg-transparent text-center font-mono text-xs text-white outline-none"
+                  />
+                  <span className="text-slate-400 text-xs font-mono">min</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Target Section */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-400 font-mono text-xs  ">
+                Target Section
+              </label>
+              <input
+                type="text"
+                value={targetSection}
+                onChange={(e) => setTargetSection(e.target.value)}
+                placeholder="e.g. Measures 208-264 (Coda), LH leap precision"
+                className="w-full bg-[#0B0E14] border border-[#1E2638] focus:border-violet-500 rounded-md px-3.5 py-2.5 text-xs text-[#F0F4F8] placeholder-slate-500 outline-none transition-colors"
+              />
+            </div>
+
+            {/* Self-Reflection */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-400 font-mono text-xs  ">
+                Self-Reflection & Tension Notes
+              </label>
+              <textarea
+                value={selfReflection}
+                onChange={(e) => setSelfReflection(e.target.value)}
+                rows={3}
+                placeholder="What felt tense or improved? Dynamics, wrist flexibility, tempo rubato pacing..."
+                className="w-full bg-[#0B0E14] border border-[#1E2638] focus:border-violet-500 rounded-md px-3.5 py-2.5 text-xs text-[#F0F4F8] placeholder-slate-500 outline-none transition-colors resize-none"
+              />
+            </div>
+
+            {/* Next Session Goal */}
+            <div className="space-y-1.5">
+              <label className="block text-slate-400 font-mono text-xs  ">
+                Next Session Goal
+              </label>
+              <input
+                type="text"
+                value={nextGoal}
+                onChange={(e) => setNextGoal(e.target.value)}
+                placeholder="e.g. Push metronome to 132 bpm without tension"
+                className="w-full bg-[#0B0E14] border border-[#1E2638] focus:border-violet-500 rounded-md px-3.5 py-2.5 text-xs text-[#F0F4F8] placeholder-slate-500 outline-none transition-colors"
+              />
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={duration <= 0 || isSubmittingSession}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-md bg-[#1E2638] hover:bg-[#2E3A52] disabled:opacity-40 text-white font-semibold text-xs sm:text-sm transition-all   active:scale-98 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Save practice session</span>
+            </button>
+          </form>
+        </div>
+
+        {/* History: Session history */}
+        <div className="lg:col-span-7 space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <History className="w-4 h-4 text-blue-400" />
+              <h3 className="text-sm font-semibold text-[#F0F4F8] tracking-tight">
+                Session history
+              </h3>
+            </div>
+            <span className="text-xs font-mono text-slate-400">
+              {piece.sessions.length} logged
+            </span>
+          </div>
+
+          {piece.sessions.length > 0 ? (
+            <div className="space-y-3">
+              {piece.sessions.map((session) => (
+                <div
+                  key={session.id}
+                  onClick={() => setSelectedSessionId(session.id)}
+                  className={`rounded-md bg-[#111622] border p-4  space-y-2 cursor-pointer transition-colors ${
+                    session.id === selectedSessionId
+                      ? 'border-blue-500/80 ring-1 ring-blue-500/30'
+                      : 'border-[#1E2638] hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-mono font-semibold bg-blue-950/50 text-blue-300 border border-blue-800/60">
+                        <Clock className="w-3 h-3 text-blue-400" />
+                        {session.durationMinutes}m
+                      </span>
+                      {session.targetSection && (
+                        <span className="text-xs font-medium text-[#F0F4F8]">
+                          {session.targetSection}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-mono text-slate-400">
+                      {formatDateTime(session.startedAtUtc)}
+                    </span>
+                  </div>
+
+                  {session.userSelfReflection && (
+                    <p className="text-xs text-slate-300 bg-[#0B0E14] rounded-lg p-2.5 border border-[#1E2638]/60">
+                      {session.userSelfReflection}
+                    </p>
+                  )}
+
+                  {session.nextSessionGoal && (
+                    <div className="flex items-start gap-1.5 text-xs text-violet-300 bg-violet-950/30 rounded-lg px-2.5 py-1.5 border border-violet-800/40">
+                      <Compass className="w-3.5 h-3.5 text-violet-400 shrink-0 mt-0.5" />
+                      <span>
+                        <strong className="font-semibold text-violet-200">Next Target:</strong>{' '}
+                        {session.nextSessionGoal}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="document-section     p-8 text-center space-y-2">
+              <div className="inline-flex items-center justify-center w-10 h-10 rounded bg-slate-800/60 text-slate-400 mb-1">
+                <Music className="w-5 h-5 text-violet-400" />
+              </div>
+              <p className="text-sm font-medium text-[#F0F4F8]">
+                No practice sessions recorded yet.
+              </p>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Log your first focused work block using the form to build a deliberate practice trail.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      </details>
+
       {/* Practice Studio & Multi-Take Section */}
       <div className="document-section     p-5   space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1E2638]">
@@ -312,10 +497,10 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setIsTakeStudioOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white   active:scale-98 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-semibold bg-[#1E2638] hover:bg-[#2E3A52] text-white   active:scale-98 transition-all cursor-pointer"
             >
               <Mic className="w-3.5 h-3.5" />
-              <span>Record / Upload Take</span>
+              <span>Upload take</span>
             </button>
           )}
         </div>
@@ -381,7 +566,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsTakeStudioOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white shrink-0 cursor-pointer  "
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1E2638] hover:bg-[#2E3A52] text-white shrink-0 cursor-pointer  "
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Take #{sessionTakes.length + pendingTakes.length + 1}</span>
@@ -531,7 +716,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsTakeStudioOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white   transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold bg-[#1E2638] hover:bg-[#2E3A52] text-white   transition-all cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Upload First Take</span>
@@ -545,192 +730,10 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
               No practice sessions logged yet.
             </p>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Log your practice session below to initialize the multi-take studio and start tracking takes.
+              Log a practice session above to start adding takes and start tracking takes.
             </p>
           </div>
         )}
-      </div>
-
-      {/* Log Practice Session & Legacy History Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Form: Log Practice Session */}
-        <div className="document-section lg:col-span-5     p-5   space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#1E2638]">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-violet-950/70 text-violet-400 border border-violet-800/60">
-                <Zap className="w-4 h-4" />
-              </div>
-              <h3 className="text-sm font-semibold text-[#F0F4F8] tracking-tight">
-                Log practice session
-              </h3>
-            </div>
-            <span className="text-xs font-mono text-slate-400">Saved across your devices</span>
-          </div>
-
-          <form onSubmit={handleSubmitSession} className="space-y-4 text-xs">
-            {/* Duration Selector */}
-            <div className="space-y-1.5">
-              <label className="block text-slate-400 font-mono text-xs  ">
-                Session Duration
-              </label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {DURATION_PRESETS.map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setDuration(preset)}
-                    className={`px-3 py-1.5 rounded-lg font-mono text-xs transition-all cursor-pointer ${
-                      duration === preset
-                        ? 'bg-blue-600 text-white font-semibold ring-1 ring-blue-400 '
-                        : 'bg-[#0B0E14] text-slate-400 border border-[#1E2638] hover:bg-[#1A202C]'
-                    }`}
-                  >
-                    {preset}m
-                  </button>
-                ))}
-                <div className="flex items-center gap-1 bg-[#0B0E14] border border-[#1E2638] rounded-lg px-2 py-1">
-                  <input
-                    type="number"
-                    min="1"
-                    max="600"
-                    value={duration}
-                    onChange={(e) => setDuration(parseInt(e.target.value) || 0)}
-                    className="w-12 bg-transparent text-center font-mono text-xs text-white outline-none"
-                  />
-                  <span className="text-slate-400 text-xs font-mono">min</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Target Section */}
-            <div className="space-y-1.5">
-              <label className="block text-slate-400 font-mono text-xs  ">
-                Target Section
-              </label>
-              <input
-                type="text"
-                value={targetSection}
-                onChange={(e) => setTargetSection(e.target.value)}
-                placeholder="e.g. Measures 208-264 (Coda), LH leap precision"
-                className="w-full bg-[#0B0E14] border border-[#1E2638] focus:border-violet-500 rounded-md px-3.5 py-2.5 text-xs text-[#F0F4F8] placeholder-slate-500 outline-none transition-colors"
-              />
-            </div>
-
-            {/* Self-Reflection */}
-            <div className="space-y-1.5">
-              <label className="block text-slate-400 font-mono text-xs  ">
-                Self-Reflection & Tension Notes
-              </label>
-              <textarea
-                value={selfReflection}
-                onChange={(e) => setSelfReflection(e.target.value)}
-                rows={3}
-                placeholder="What felt tense or improved? Dynamics, wrist flexibility, tempo rubato pacing..."
-                className="w-full bg-[#0B0E14] border border-[#1E2638] focus:border-violet-500 rounded-md px-3.5 py-2.5 text-xs text-[#F0F4F8] placeholder-slate-500 outline-none transition-colors resize-none"
-              />
-            </div>
-
-            {/* Next Session Goal */}
-            <div className="space-y-1.5">
-              <label className="block text-slate-400 font-mono text-xs  ">
-                Next Session Goal
-              </label>
-              <input
-                type="text"
-                value={nextGoal}
-                onChange={(e) => setNextGoal(e.target.value)}
-                placeholder="e.g. Push metronome to 132 bpm without tension"
-                className="w-full bg-[#0B0E14] border border-[#1E2638] focus:border-violet-500 rounded-md px-3.5 py-2.5 text-xs text-[#F0F4F8] placeholder-slate-500 outline-none transition-colors"
-              />
-            </div>
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={duration <= 0 || isSubmittingSession}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-md bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-semibold text-xs sm:text-sm transition-all   active:scale-98 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Save practice session</span>
-            </button>
-          </form>
-        </div>
-
-        {/* History: Session history */}
-        <div className="lg:col-span-7 space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
-              <History className="w-4 h-4 text-blue-400" />
-              <h3 className="text-sm font-semibold text-[#F0F4F8] tracking-tight">
-                Session history
-              </h3>
-            </div>
-            <span className="text-xs font-mono text-slate-400">
-              {piece.sessions.length} logged
-            </span>
-          </div>
-
-          {piece.sessions.length > 0 ? (
-            <div className="space-y-3">
-              {piece.sessions.map((session) => (
-                <div
-                  key={session.id}
-                  onClick={() => setSelectedSessionId(session.id)}
-                  className={`rounded-md bg-[#111622] border p-4  space-y-2 cursor-pointer transition-colors ${
-                    session.id === selectedSessionId
-                      ? 'border-blue-500/80 ring-1 ring-blue-500/30'
-                      : 'border-[#1E2638] hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-mono font-semibold bg-blue-950/50 text-blue-300 border border-blue-800/60">
-                        <Clock className="w-3 h-3 text-blue-400" />
-                        {session.durationMinutes}m
-                      </span>
-                      {session.targetSection && (
-                        <span className="text-xs font-medium text-[#F0F4F8]">
-                          {session.targetSection}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs font-mono text-slate-400">
-                      {formatDateTime(session.startedAtUtc)}
-                    </span>
-                  </div>
-
-                  {session.userSelfReflection && (
-                    <p className="text-xs text-slate-300 bg-[#0B0E14] rounded-lg p-2.5 border border-[#1E2638]/60">
-                      {session.userSelfReflection}
-                    </p>
-                  )}
-
-                  {session.nextSessionGoal && (
-                    <div className="flex items-start gap-1.5 text-xs text-violet-300 bg-violet-950/30 rounded-lg px-2.5 py-1.5 border border-violet-800/40">
-                      <Compass className="w-3.5 h-3.5 text-violet-400 shrink-0 mt-0.5" />
-                      <span>
-                        <strong className="font-semibold text-violet-200">Next Target:</strong>{' '}
-                        {session.nextSessionGoal}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="document-section     p-8 text-center space-y-2">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded bg-slate-800/60 text-slate-400 mb-1">
-                <Music className="w-5 h-5 text-violet-400" />
-              </div>
-              <p className="text-sm font-medium text-[#F0F4F8]">
-                No practice sessions recorded yet.
-              </p>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Log your first focused work block using the form to build a deliberate practice trail.
-              </p>
-            </div>
-          )}
-        </div>
       </div>
 
       <details className="border border-slate-700 rounded-md p-4">

@@ -79,14 +79,16 @@ Cadence/
 ├── tools/
 │   └── audio_analyzer/            # Standalone Python Audio DSP CLI Worker
 │       ├── analyze.py             # Librosa/Scipy onset, tempo & RMS analyzer
-│       └── requirements.txt       # Python dependencies
+│       └── requirements.txt       # Pinned Python dependencies
 ├── tests/
 │   └── Cadence.Api.Tests/         # xUnit Domain & State Machine Tests
+├── .env.example                   # Sample environment file for ~/.config/cadence/cadence.env
 └── deploy/                        # Arch Linux deployment & systemd user services
-    ├── build-release.sh           # End-to-end production build & publish script
+    ├── build-release.sh           # Staged atomic production build & publish script
+    ├── rollback-release.sh        # Atomic release rollback script
     ├── backup-db.sh               # SQLite hot online backup + media sync script
     ├── restore-db.sh              # Verified WAL-safe SQLite restore script
-    ├── install-systemd.sh         # Systemd user units installer
+    ├── install-systemd.sh         # Systemd user units installer (parameterized paths)
     └── systemd/                   # User unit definitions (.service, .timer)
 ```
 
@@ -100,6 +102,16 @@ Cadence/
 - Python 3.10+ (with `venv`)
 - FFmpeg (for media audio extraction)
 - SQLite3 CLI
+
+### Python DSP Virtual Environment Setup
+Initialize the DSP worker virtual environment with the pinned dependency versions in `tools/audio_analyzer/requirements.txt`:
+```bash
+cd tools/audio_analyzer
+python3 -m venv .venv
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
+```
+At runtime, `Cadence.Api` resolves the worker script and Python interpreter explicitly via `Cadence:DspScriptPath` / `CADENCE_DSP_SCRIPT` and `Cadence:DspPythonPath` / `CADENCE_DSP_PYTHON`, defaulting to the `tools/audio_analyzer/analyze.py` bundled inside the published release directory.
 
 ### Local Development
 
@@ -125,58 +137,76 @@ Cadence/
 
 ## Production Build & Arch Linux Deployment
 
-### 1. Build Single-Port Production Release
+### 1. Build Single-Port Production Release (Staged & Reversible)
 Run the automated build script:
 ```bash
 ./deploy/build-release.sh
 ```
-This builds the React PWA, syncs compiled assets to `wwwroot`, initializes the Python virtualenv for the DSP analyzer, and publishes `Cadence.Api` to `deploy/publish/`.
+This builds the React PWA, initializes/updates the Python DSP virtualenv, publishes `Cadence.Api` (including `wwwroot/` and `tools/audio_analyzer/`) into a new timestamped release directory under `deploy/releases/release-<timestamp>-<sha>/`, verifies the build, and atomically flips the `deploy/current` symlink (preserving the prior release at `deploy/previous`). If any step fails, the incomplete staging directory is removed and the active release remains untouched.
 
-To test the compiled single-port release locally:
+To roll back to the previous release at any time:
 ```bash
-./deploy/publish/Cadence.Api --urls "http://0.0.0.0:5006"
+./deploy/rollback-release.sh
+systemctl --user restart cadence.service
 ```
-Visit `http://localhost:5006/` in any browser.
+
+To test the compiled single-port release locally on loopback:
+```bash
+./deploy/current/Cadence.Api --urls "http://127.0.0.1:5006"
+```
+Visit `http://127.0.0.1:5006/` in any browser.
 
 ---
 
-### 2. Arch Linux Systemd User Service Setup
+### 2. Arch Linux Systemd User Service & Environment Secrets
 
 Cadence runs cleanly under user systemd (`systemd --user`) without requiring root privileges.
 
-1. **Install and Enable Units:**
+1. **Configure Environment & Secrets (`~/.config/cadence/cadence.env`):**
+   Secrets (such as `GEMINI_API_KEY`) and local overrides live in `~/.config/cadence/cadence.env` (mode `0600`), loaded automatically by `cadence.service` via `EnvironmentFile=-%h/.config/cadence/cadence.env` so tracked files never need to be edited:
+   ```bash
+   mkdir -p -m 700 ~/.config/cadence
+   cp .env.example ~/.config/cadence/cadence.env
+   chmod 600 ~/.config/cadence/cadence.env
+   ```
+
+2. **Install and Enable Units:**
    ```bash
    ./deploy/install-systemd.sh
    ```
-   This installs:
-   - `~/.config/systemd/user/cadence.service`: Starts Cadence on boot and restarts on failure.
+   *(Optional: set `CADENCE_INSTALL_ROOT=/path/to/Cadence` to install against a custom path; defaults to the repository directory.)*
+   This renders and installs:
+   - `~/.config/systemd/user/cadence.service`: Starts `deploy/current/Cadence.Api` bound to loopback (`127.0.0.1:5006`) on boot and restarts on failure.
    - `~/.config/systemd/user/cadence-backup.timer`: Daily SQLite hot backup timer at 03:30 AM.
    - `~/.config/systemd/user/cadence-backup.service`: Runs `deploy/backup-db.sh`.
 
-2. **Check Service Status:**
+3. **Check Service Status:**
    ```bash
    systemctl --user status cadence.service
    journalctl --user -u cadence.service -f
    ```
 
-3. **Check Backup Timer:**
+4. **Check Backup Timer:**
    ```bash
    systemctl --user list-timers --user | grep cadence
    ```
 
 ---
 
-### 3. Remote Access via Tailscale (Android PWA)
+### 3. Remote Access via Tailscale Serve (HTTPS on Loopback)
 
-To access Cadence from Android or other devices on your Tailnet:
+By default, `cadence.service` binds strictly to `http://127.0.0.1:5006` so unauthenticated API routes are not exposed on local Wi-Fi/LAN interfaces. Tailscale Serve terminates HTTPS for your tailnet and proxies traffic to loopback port `5006`:
 
-1. **Ensure Cadence is running on port 5006** (`cadence.service`).
-2. **Serve over Tailscale HTTPS:**
+1. **Ensure Cadence is running on loopback port 5006** (`cadence.service`).
+2. **Expose loopback port 5006 over Tailscale HTTPS:**
    ```bash
-   tailscale serve --bg 5006
+   tailscale serve --bg http://127.0.0.1:5006
    ```
-3. Open your Tailscale machine URL (e.g., `https://arch-host.tailnet.ts.net`) in Chrome on Android.
+   *(To inspect or stop serving: `tailscale serve status` / `tailscale serve reset`.)*
+3. Open your Tailscale machine HTTPS URL (e.g., `https://arch-host.tailnet.ts.net`) in Chrome on Android.
 4. Tap **Install App** / **Add to Home screen**. The dark-themed Cadence PWA will install as a standalone mobile application with full offline caching and outbox synchronization.
+
+> **Opt-in Direct LAN Mode:** If you intentionally want to expose Cadence directly on all network interfaces without Tailscale Serve, set `ASPNETCORE_URLS=http://0.0.0.0:5006` in `~/.config/cadence/cadence.env` and restart `cadence.service`. Only enable this on a trusted private network.
 
 ---
 

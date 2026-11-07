@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/Development/Projects/Cadence/deploy/backup-db.sh
+EnvironmentFile=-%h/.config/cadence/cadence.env
+ExecStart=%h/.local/opt/cadence/deploy/backup-db.sh
 StandardOutput=journal
 StandardError=journal

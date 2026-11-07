@@ -26,8 +26,9 @@ dist-ssr/
 
 # Environment & Secret files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+cadence.env
 appsettings.Local.json
 appsettings.*.local.json
 
@@ -51,7 +52,11 @@ __pycache__/
 Thumbs.db
 
 # Deployment & Build Outputs
+deploy/publish
 deploy/publish/
+deploy/releases/
+deploy/current
+deploy/previous
 src/Cadence.Api/wwwroot/
 
 # Local agent tooling

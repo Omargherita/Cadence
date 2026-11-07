@@ -4,15 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Development/Projects/Cadence
-ExecStart=%h/Development/Projects/Cadence/deploy/publish/Cadence.Api --urls http://0.0.0.0:5006
+WorkingDirectory=%h/.local/opt/cadence/deploy/current
+ExecStart=%h/.local/opt/cadence/deploy/current/Cadence.Api
 Restart=on-failure
 RestartSec=5s
 
-Environment=DOTNET_ROOT=%h/.dotnet
-Environment=PATH=%h/.dotnet:/usr/local/bin:/usr/bin:/bin
 Environment=ASPNETCORE_ENVIRONMENT=Production
-Environment=ASPNETCORE_URLS=http://0.0.0.0:5006
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5006
+EnvironmentFile=-%h/.config/cadence/cadence.env
 
 StandardOutput=journal
 StandardError=journal

@@ -195,7 +195,9 @@ Cadence runs cleanly under user systemd (`systemd --user`) without requiring roo
 
 ### 3. Remote Access via Tailscale Serve (HTTPS on Loopback)
 
-By default, `cadence.service` binds strictly to `http://127.0.0.1:5006` so unauthenticated API routes are not exposed on local Wi-Fi/LAN interfaces. Tailscale Serve terminates HTTPS for your tailnet and proxies traffic to loopback port `5006`:
+By default, `cadence.service` binds strictly to `http://127.0.0.1:5006` so unauthenticated API routes are not exposed on local Wi-Fi/LAN interfaces, and `SameOriginMutationGuardMiddleware` enforces a single-user same-origin check on all mutating `/api/*` requests (`POST`, `PUT`, `PATCH`, `DELETE`, including score PDF and practice take multipart uploads). Requests without an `Origin` header (`curl`, CLI scripts, `GET` requests) are allowed; when a browser sends an `Origin` header, its `host[:port]` must match `Request.Host`, `X-Forwarded-Host`, or an entry in `Cadence:AllowedOrigins` (`Cadence__AllowedOrigins` / `CADENCE_ALLOWED_ORIGINS`), otherwise the API returns `403 Forbidden` and logs a warning with the rejected origin.
+
+Tailscale Serve terminates HTTPS for your tailnet and proxies traffic to loopback port `5006`:
 
 1. **Ensure Cadence is running on loopback port 5006** (`cadence.service`).
 2. **Expose loopback port 5006 over Tailscale HTTPS:**
@@ -203,8 +205,16 @@ By default, `cadence.service` binds strictly to `http://127.0.0.1:5006` so unaut
    tailscale serve --bg http://127.0.0.1:5006
    ```
    *(To inspect or stop serving: `tailscale serve status` / `tailscale serve reset`.)*
-3. Open your Tailscale machine HTTPS URL (e.g., `https://arch-host.tailnet.ts.net`) in Chrome on Android.
-4. Tap **Install App** / **Add to Home screen**. The dark-themed Cadence PWA will install as a standalone mobile application with full offline caching and outbox synchronization.
+3. **Verify or allow-list your Tailscale Serve `Origin` header by hand:**
+   - Run `tailscale serve status` to see your HTTPS MagicDNS URL (for example, `https://<machine>.<tailnet>.ts.net`). That exact `https://<machine>.<tailnet>.ts.net` value is the `Origin` header browsers send on `POST`/`PUT`/`PATCH`/`DELETE` requests.
+   - If your reverse proxy forwards `X-Forwarded-Host: <machine>.<tailnet>.ts.net`, the origin check matches automatically. If `Host` is rewritten to `127.0.0.1:5006` without `X-Forwarded-Host`, add your Tailscale origin to `~/.config/cadence/cadence.env` and restart the service:
+     ```ini
+     Cadence__AllowedOrigins=https://<machine>.<tailnet>.ts.net
+     ```
+   - **Lockout recovery:** If you get locked out of the app after changing how you expose it, set `Cadence__EnableOriginCheck=false` in `~/.config/cadence/cadence.env` and restart `cadence.service` (`systemctl --user restart cadence.service`).
+   - *Note: Live Tailscale Serve proxy header forwarding and Android Chrome PWA behavior are **not verified** in automated tests and should be checked once by hand after enabling Tailscale Serve.*
+4. Open your Tailscale machine HTTPS URL (e.g., `https://arch-host.tailnet.ts.net`) in Chrome on Android.
+5. Tap **Install App** / **Add to Home screen**. The dark-themed Cadence PWA will install as a standalone mobile application with full offline caching and outbox synchronization.
 
 > **Opt-in Direct LAN Mode:** If you intentionally want to expose Cadence directly on all network interfaces without Tailscale Serve, set `ASPNETCORE_URLS=http://0.0.0.0:5006` in `~/.config/cadence/cadence.env` and restart `cadence.service`. Only enable this on a trusted private network.
 

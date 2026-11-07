@@ -79,6 +79,9 @@ using (var scope = app.Services.CreateScope())
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+// Guard mutating /api/* routes against cross-origin browser requests
+app.UseMiddleware<SameOriginMutationGuardMiddleware>();
+
 // Map Endpoints
 app.MapSystemEndpoints();
 app.MapTaskEndpoints();

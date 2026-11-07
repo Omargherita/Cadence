@@ -85,15 +85,20 @@ mv -n "${STAGING_FILE}" "${BACKUP_FILE}"
 chmod 600 "${BACKUP_FILE}"
 
 # Note: SQLite database backups do NOT contain score PDFs or recorded takes.
-# Sync the media directory separately into backups/media/.
-if [ -d "${MEDIA_DIR}" ]; then
+# Copy the media directory separately into backups/media/.
+# This is an additive copy, never a mirror: a missing or empty media source must
+# never be able to erase media that was already backed up.
+if [ ! -d "${MEDIA_DIR}" ]; then
+    echo "Media directory ${MEDIA_DIR} not found; skipping media backup."
+elif [ -z "$(find "${MEDIA_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    echo "Media directory ${MEDIA_DIR} is empty; skipping media backup."
+else
     MEDIA_BACKUP_DIR="${BACKUP_DIR}/media"
     mkdir -p -m 700 "${MEDIA_BACKUP_DIR}"
     chmod 700 "${MEDIA_BACKUP_DIR}"
     if command -v rsync >/dev/null 2>&1; then
-        rsync -a --delete "${MEDIA_DIR}/" "${MEDIA_BACKUP_DIR}/"
+        rsync -a "${MEDIA_DIR}/" "${MEDIA_BACKUP_DIR}/"
     else
-        find "${MEDIA_BACKUP_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         cp -a "${MEDIA_DIR}/." "${MEDIA_BACKUP_DIR}/"
     fi
 fi

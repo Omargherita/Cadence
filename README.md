@@ -187,7 +187,7 @@ All state is preserved under `~/.local/share/cadence/` (or the path configured v
 - `~/.local/share/cadence/media/`: Uploaded score PDFs and recorded take media. **Note:** SQLite `.db` backups contain relational metadata only and do **not** embed score PDFs or audio/video files.
 - `~/.local/share/cadence/backups/`:
   - `cadence-YYYYMMDD_HHMMSS_fff-<id>.db`: Atomic online SQLite backups created via `POST /api/system/backup` or `deploy/backup-db.sh` (serialized via `.backup.lock`, retaining the latest `Cadence:BackupRetentionCount` / `CADENCE_BACKUP_RETENTION_COUNT` snapshots, default `30`).
-  - `media/`: Synchronized copy of the `media/` directory maintained by `deploy/backup-db.sh`.
+  - `media/`: Additive copy of the `media/` directory maintained by `deploy/backup-db.sh` (never pruned by the script, so media deleted in the app stays recoverable; an empty media directory is skipped rather than wiping the copy).
   - `pre-restore/`: Timestamped safety snapshots of `app.db`, `app.db-wal`, and `app.db-shm` captured automatically before any restore.
 
 To perform a manual hot backup (both SQLite database and `media/` directory) at any time:

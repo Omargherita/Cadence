@@ -2,6 +2,7 @@ using Cadence.Api.Domain.MusicalLibrary;
 using Cadence.Api.Domain.PianoMentor;
 using Cadence.Api.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cadence.Api.Features.PianoMentor;
@@ -37,8 +38,16 @@ public static class PianoMentorEndpoints
                 return Results.BadRequest(new { error = "Only PDF files are supported for scores." });
             }
 
-            await using var stream = file.OpenReadStream();
-            var relativePath = await mediaService.SaveScorePdfAsync(pieceId, stream, ct);
+            string relativePath;
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                relativePath = await mediaService.SaveScorePdfAsync(pieceId, stream, ct);
+            }
+            catch (InvalidMediaException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
 
             piece.ScoreCapabilityTier = ScoreCapabilityTier.VisualPdfOnly;
             piece.ScoreFilePath = relativePath;
@@ -69,13 +78,20 @@ public static class PianoMentorEndpoints
                 return Results.NotFound(new { error = $"Score not found for piece '{pieceId}'." });
             }
 
-            var fullPath = mediaService.GetFullPath(piece.ScoreFilePath);
-            if (!File.Exists(fullPath))
+            try
             {
-                return Results.NotFound(new { error = "Score file is missing on storage disk." });
-            }
+                var fullPath = mediaService.GetFullPath(piece.ScoreFilePath);
+                if (!File.Exists(fullPath))
+                {
+                    return Results.NotFound(new { error = "Score file is missing on storage disk." });
+                }
 
-            return Results.File(fullPath, "application/pdf", enableRangeProcessing: true);
+                return Results.File(fullPath, "application/pdf", enableRangeProcessing: true);
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { error = "Invalid score file path or symlink traversal rejected." });
+            }
         });
 
         // 3. Manually Track a Known Piece Weakness
@@ -174,6 +190,10 @@ public static class PianoMentorEndpoints
                 return Results.BadRequest(new { error = "A media file (MP3 or MP4) is required." });
             }
 
+            var takeId = Guid.TryParse(form["id"].ToString(), out var parsedId) && parsedId != Guid.Empty
+                ? parsedId
+                : Guid.CreateVersion7();
+
             var scopeStr = form["scope"].ToString();
             var scope = Enum.TryParse<TakeScope>(scopeStr, true, out var parsedScope) ? parsedScope : TakeScope.PassageClip;
 
@@ -190,52 +210,95 @@ public static class PianoMentorEndpoints
             var attachedPdfPages = form["attachedPdfPages"].ToString();
             var includeVideoPosture = bool.TryParse(form["includeVideoPostureAnalysis"].ToString(), out var b) && b;
 
-            var takeNumber = session.Takes.Count + 1;
-
-            await using var stream = file.OpenReadStream();
-            var processedMedia = await mediaService.ProcessUploadedTakeAsync(
-                pieceId,
-                sessionId,
-                takeNumber,
-                file.FileName,
-                stream,
-                ct);
-
-            // Execute Python DSP Audio Analysis on the extracted 24kHz MP3
-            var fullAudioPath = mediaService.GetFullPath(processedMedia.ExtractedAudioRelativePath);
-            var dspMetrics = await dspAnalyzer.AnalyzeAudioAsync(fullAudioPath, ct);
-
-            var take = new PracticeTake
+            ProcessedTakeMedia processedMedia;
+            try
             {
-                Id = Guid.CreateVersion7(),
-                PracticeSessionId = sessionId,
-                TakeNumber = takeNumber,
-                Scope = scope,
-                TargetSection = targetSection,
-                UserSelfReflection = userSelfReflection,
-                AttachedPdfPages = attachedPdfPages,
-                IncludeVideoPostureAnalysis = includeVideoPosture,
-                OriginalMediaRelativePath = processedMedia.OriginalRelativePath,
-                ExtractedAudioRelativePath = processedMedia.ExtractedAudioRelativePath,
-                OriginalMediaType = processedMedia.OriginalMediaType,
-                SourceQuality = quality,
-                DurationSeconds = processedMedia.DurationSeconds ?? (dspMetrics.DurationSeconds > 0 ? dspMetrics.DurationSeconds : null),
-                ObjectiveDspMetricsJson = dspMetrics.RawJson,
-                CreatedAtUtc = DateTimeOffset.UtcNow
-            };
+                await using var stream = file.OpenReadStream();
+                processedMedia = await mediaService.ProcessUploadedTakeAsync(
+                    pieceId,
+                    sessionId,
+                    takeId,
+                    file.FileName,
+                    stream,
+                    ct);
+            }
+            catch (InvalidMediaException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
 
-            db.PracticeTakes.Add(take);
+            try
+            {
+                // Provisional take number for prompt context; final display number is allocated inside the DB transaction below
+                var provisionalTakeNumber = (await db.PracticeTakes
+                    .Where(t => t.PracticeSessionId == sessionId)
+                    .Select(t => (int?)t.TakeNumber)
+                    .MaxAsync(ct) ?? 0) + 1;
 
-            // Execute Mentor Assessment & Weakness State Machine with DSP evidence
-            var assessment = await mentorService.AssessTakeAsync(piece, session, take, dspMetrics, w => db.Weaknesses.Add(w), ct);
-            take.Assessment = assessment;
+                // Execute Python DSP Audio Analysis on the extracted 24kHz MP3
+                var fullAudioPath = mediaService.GetFullPath(processedMedia.ExtractedAudioRelativePath);
+                var dspMetrics = await dspAnalyzer.AnalyzeAudioAsync(fullAudioPath, ct);
 
-            piece.LastPracticedAtUtc = take.CreatedAtUtc;
-            piece.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                var take = new PracticeTake
+                {
+                    Id = takeId,
+                    PracticeSessionId = sessionId,
+                    TakeNumber = provisionalTakeNumber,
+                    Scope = scope,
+                    TargetSection = targetSection,
+                    UserSelfReflection = userSelfReflection,
+                    AttachedPdfPages = attachedPdfPages,
+                    IncludeVideoPostureAnalysis = includeVideoPosture,
+                    OriginalMediaRelativePath = processedMedia.OriginalRelativePath,
+                    ExtractedAudioRelativePath = processedMedia.ExtractedAudioRelativePath,
+                    OriginalMediaType = processedMedia.OriginalMediaType,
+                    SourceQuality = quality,
+                    DurationSeconds = processedMedia.DurationSeconds ?? (dspMetrics.DurationSeconds > 0 ? dspMetrics.DurationSeconds : null),
+                    ObjectiveDspMetricsJson = dspMetrics.RawJson,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                };
 
-            await db.SaveChangesAsync(ct);
+                // Execute Mentor Assessment & Weakness State Machine with DSP evidence
+                var assessment = await mentorService.AssessTakeAsync(piece, session, take, dspMetrics, w => db.Weaknesses.Add(w), ct);
+                take.Assessment = assessment;
 
-            return Results.Created($"/api/pieces/{pieceId}/sessions/{sessionId}/takes/{take.Id}", take);
+                piece.LastPracticedAtUtc = take.CreatedAtUtc;
+                piece.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+                db.PracticeTakes.Add(take);
+
+                // Allocate monotonic TakeNumber safely inside a transaction with retry on concurrent unique index collision
+                const int maxAttempts = 8;
+                for (int attempt = 1; ; attempt++)
+                {
+                    await using var tx = await db.Database.BeginTransactionAsync(ct);
+                    var currentMax = await db.PracticeTakes
+                        .Where(t => t.PracticeSessionId == sessionId)
+                        .Select(t => (int?)t.TakeNumber)
+                        .MaxAsync(ct) ?? 0;
+                    take.TakeNumber = currentMax + 1;
+
+                    try
+                    {
+                        await db.SaveChangesAsync(ct);
+                        await tx.CommitAsync(ct);
+                        break;
+                    }
+                    catch (DbUpdateException ex) when (attempt < maxAttempts && IsUniqueOrBusySqliteException(ex))
+                    {
+                        await tx.RollbackAsync(ct);
+                        await Task.Delay(TimeSpan.FromMilliseconds(15 * attempt), ct);
+                    }
+                }
+
+                return Results.Created($"/api/pieces/{pieceId}/sessions/{sessionId}/takes/{take.Id}", take);
+            }
+            catch
+            {
+                mediaService.DeleteMediaFileIfExists(processedMedia.OriginalRelativePath);
+                mediaService.DeleteMediaFileIfExists(processedMedia.ExtractedAudioRelativePath);
+                throw;
+            }
         })
         .DisableAntiforgery()
         .WithMetadata(new DisableRequestSizeLimitAttribute());
@@ -301,5 +364,11 @@ public static class PianoMentorEndpoints
         });
 
         return group;
+    }
+
+    private static bool IsUniqueOrBusySqliteException(DbUpdateException ex)
+    {
+        return ex.InnerException is SqliteException sqliteEx &&
+               sqliteEx.SqliteErrorCode is 19 or 5 or 6; // SQLITE_CONSTRAINT, SQLITE_BUSY, SQLITE_LOCKED
     }
 }

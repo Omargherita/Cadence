@@ -39,11 +39,32 @@ public static class DomainEditingEndpoints
             await db.SaveChangesAsync();
             return Results.NoContent();
         });
-        app.MapDelete("/api/pieces/{id:guid}", async (Guid id, CadenceDbContext db) =>
+        app.MapDelete("/api/pieces/{id:guid}", async (Guid id, CadenceDbContext db, IMediaProcessingService mediaService) =>
         {
-            var piece = await db.Pieces.FindAsync(id);
+            var piece = await db.Pieces
+                .Include(p => p.Sessions)
+                    .ThenInclude(s => s.Takes)
+                .FirstOrDefaultAsync(p => p.Id == id);
             if (piece is null) return Results.NotFound();
-            db.Pieces.Remove(piece); await db.SaveChangesAsync();
+
+            var scorePath = piece.ScoreFilePath;
+            var takePaths = piece.Sessions
+                .SelectMany(s => s.Takes)
+                .SelectMany(t => new[] { t.OriginalMediaRelativePath, t.ExtractedAudioRelativePath })
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Distinct()
+                .ToList();
+
+            db.Pieces.Remove(piece);
+            await db.SaveChangesAsync();
+
+            mediaService.DeleteMediaFileIfExists(scorePath);
+            foreach (var path in takePaths)
+            {
+                mediaService.DeleteMediaFileIfExists(path);
+            }
+            mediaService.DeletePieceMediaDirectory(id);
+
             return Results.NoContent();
         });
         app.MapPut("/api/pieces/{pieceId:guid}/sessions/{id:guid}", async (Guid pieceId, Guid id, CreatePracticeSessionRequest request, CadenceDbContext db) =>
@@ -58,11 +79,29 @@ public static class DomainEditingEndpoints
             await db.SaveChangesAsync(); await RefreshPiece(db, pieceId);
             return Results.NoContent();
         });
-        app.MapDelete("/api/pieces/{pieceId:guid}/sessions/{id:guid}", async (Guid pieceId, Guid id, CadenceDbContext db) =>
+        app.MapDelete("/api/pieces/{pieceId:guid}/sessions/{id:guid}", async (Guid pieceId, Guid id, CadenceDbContext db, IMediaProcessingService mediaService) =>
         {
-            var session = await db.PracticeSessions.FirstOrDefaultAsync(s => s.Id == id && s.PieceId == pieceId);
+            var session = await db.PracticeSessions
+                .Include(s => s.Takes)
+                .FirstOrDefaultAsync(s => s.Id == id && s.PieceId == pieceId);
             if (session is null) return Results.NotFound();
-            db.PracticeSessions.Remove(session); await db.SaveChangesAsync(); await RefreshPiece(db, pieceId);
+
+            var takePaths = session.Takes
+                .SelectMany(t => new[] { t.OriginalMediaRelativePath, t.ExtractedAudioRelativePath })
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Distinct()
+                .ToList();
+
+            db.PracticeSessions.Remove(session);
+            await db.SaveChangesAsync();
+            await RefreshPiece(db, pieceId);
+
+            foreach (var path in takePaths)
+            {
+                mediaService.DeleteMediaFileIfExists(path);
+            }
+            mediaService.DeleteSessionMediaDirectory(pieceId, id);
+
             return Results.NoContent();
         });
         app.MapPut("/api/pieces/{pieceId:guid}/weaknesses/{id:guid}", async (Guid pieceId, Guid id, UpdateWeaknessRequest request, CadenceDbContext db) =>
@@ -89,11 +128,24 @@ public static class DomainEditingEndpoints
             take.TargetSection = request.TargetSection?.Trim() ?? ""; take.UserSelfReflection = request.UserSelfReflection?.Trim() ?? "";
             await db.SaveChangesAsync(); return Results.NoContent();
         });
-        app.MapDelete("/api/pieces/{pieceId:guid}/sessions/{sessionId:guid}/takes/{id:guid}", async (Guid pieceId, Guid sessionId, Guid id, CadenceDbContext db) =>
+        app.MapDelete("/api/pieces/{pieceId:guid}/sessions/{sessionId:guid}/takes/{id:guid}", async (Guid pieceId, Guid sessionId, Guid id, CadenceDbContext db, IMediaProcessingService mediaService) =>
         {
             var take = await db.PracticeTakes.FirstOrDefaultAsync(t => t.Id == id && t.PracticeSessionId == sessionId && t.PracticeSession!.PieceId == pieceId);
             if (take is null) return Results.NotFound();
-            db.PracticeTakes.Remove(take); await db.SaveChangesAsync(); return Results.NoContent();
+
+            var origPath = take.OriginalMediaRelativePath;
+            var audioPath = take.ExtractedAudioRelativePath;
+
+            db.PracticeTakes.Remove(take);
+            await db.SaveChangesAsync();
+
+            mediaService.DeleteMediaFileIfExists(origPath);
+            if (!string.Equals(origPath, audioPath, StringComparison.Ordinal))
+            {
+                mediaService.DeleteMediaFileIfExists(audioPath);
+            }
+
+            return Results.NoContent();
         });
     }
 

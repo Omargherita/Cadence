@@ -84,7 +84,8 @@ Cadence/
 │   └── Cadence.Api.Tests/         # xUnit Domain & State Machine Tests
 └── deploy/                        # Arch Linux deployment & systemd user services
     ├── build-release.sh           # End-to-end production build & publish script
-    ├── backup-db.sh               # SQLite hot online backup script
+    ├── backup-db.sh               # SQLite hot online backup + media sync script
+    ├── restore-db.sh              # Verified WAL-safe SQLite restore script
     ├── install-systemd.sh         # Systemd user units installer
     └── systemd/                   # User unit definitions (.service, .timer)
 ```
@@ -181,19 +182,23 @@ To access Cadence from Android or other devices on your Tailnet:
 
 ## Data Management & Backups
 
-All state is preserved under `~/.local/share/cadence/`:
-- `~/.local/share/cadence/db/app.db`: SQLite database in Write-Ahead Logging (WAL) mode.
-- `~/.local/share/cadence/media/`: Uploaded score PDFs and recorded take media.
-- `~/.local/share/cadence/backups/`: Atomic online backups created by `cadence-backup.timer`.
+All state is preserved under `~/.local/share/cadence/` (or the path configured via `Cadence:StorageRoot` / `CADENCE_STORAGE_ROOT`) with private directory (`0700`) and file (`0600`) permissions:
+- `~/.local/share/cadence/db/app.db`: SQLite database in Write-Ahead Logging (WAL) mode (`app.db-wal` and `app.db-shm` sidecars exist while active).
+- `~/.local/share/cadence/media/`: Uploaded score PDFs and recorded take media. **Note:** SQLite `.db` backups contain relational metadata only and do **not** embed score PDFs or audio/video files.
+- `~/.local/share/cadence/backups/`:
+  - `cadence-YYYYMMDD_HHMMSS_fff-<id>.db`: Atomic online SQLite backups created via `POST /api/system/backup` or `deploy/backup-db.sh` (serialized via `.backup.lock`, retaining the latest `Cadence:BackupRetentionCount` / `CADENCE_BACKUP_RETENTION_COUNT` snapshots, default `30`).
+  - `media/`: Synchronized copy of the `media/` directory maintained by `deploy/backup-db.sh`.
+  - `pre-restore/`: Timestamped safety snapshots of `app.db`, `app.db-wal`, and `app.db-shm` captured automatically before any restore.
 
-To perform a manual hot backup at any time:
+To perform a manual hot backup (both SQLite database and `media/` directory) at any time:
 ```bash
 ./deploy/backup-db.sh
 ```
 
-To restore from a backup:
+To safely restore from a database backup (never copy a backup directly over `app.db` while stale `-wal`/`-shm` sidecars remain):
 ```bash
 systemctl --user stop cadence.service
-cp ~/.local/share/cadence/backups/cadence-YYYYMMDD_HHMMSS.db ~/.local/share/cadence/db/app.db
+./deploy/restore-db.sh ~/.local/share/cadence/backups/cadence-YYYYMMDD_HHMMSS_fff-XXXXXXXX.db
 systemctl --user start cadence.service
 ```
+`deploy/restore-db.sh` refuses to run while `cadence.service` is active, stages and verifies the candidate backup with `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before touching `db/`, archives the existing `app.db` and `-wal`/`-shm` sidecars into `backups/pre-restore/`, removes stale WAL/SHM sidecars, and atomically moves the verified database into place.

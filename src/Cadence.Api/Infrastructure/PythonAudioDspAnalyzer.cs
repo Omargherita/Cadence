@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Configuration;
 
 namespace Cadence.Api.Infrastructure;
 
@@ -10,6 +11,7 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
     private static readonly TimeSpan AnalysisTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ILogger<PythonAudioDspAnalyzer> _logger;
+    private readonly IConfiguration? _configuration;
     private readonly string? _pythonPathOverride;
     private readonly string? _scriptPathOverride;
 
@@ -21,10 +23,19 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
 
     public PythonAudioDspAnalyzer(
         ILogger<PythonAudioDspAnalyzer> logger,
+        IConfiguration configuration)
+        : this(logger, pythonPathOverride: null, scriptPathOverride: null, configuration: configuration)
+    {
+    }
+
+    public PythonAudioDspAnalyzer(
+        ILogger<PythonAudioDspAnalyzer> logger,
         string? pythonPathOverride = null,
-        string? scriptPathOverride = null)
+        string? scriptPathOverride = null,
+        IConfiguration? configuration = null)
     {
         _logger = logger;
+        _configuration = configuration;
         _pythonPathOverride = pythonPathOverride;
         _scriptPathOverride = scriptPathOverride;
     }
@@ -116,60 +127,51 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
         }
     }
 
-    private (string pythonPath, string scriptPath) ResolvePaths()
+    public (string pythonPath, string scriptPath) ResolvePaths()
     {
-        if (!string.IsNullOrWhiteSpace(_scriptPathOverride))
+        var configuredScript = _scriptPathOverride
+            ?? _configuration?["Cadence:DspScriptPath"]
+            ?? _configuration?["CADENCE_DSP_SCRIPT"]
+            ?? Environment.GetEnvironmentVariable("CADENCE_DSP_SCRIPT");
+
+        var configuredPython = _pythonPathOverride
+            ?? _configuration?["Cadence:DspPythonPath"]
+            ?? _configuration?["CADENCE_DSP_PYTHON"]
+            ?? Environment.GetEnvironmentVariable("CADENCE_DSP_PYTHON");
+
+        var scriptPath = !string.IsNullOrWhiteSpace(configuredScript)
+            ? configuredScript
+            : Path.Combine(AppContext.BaseDirectory, "tools", "audio_analyzer", "analyze.py");
+
+        if (!string.IsNullOrWhiteSpace(configuredPython))
         {
-            return (_pythonPathOverride ?? "python3", _scriptPathOverride);
+            return (configuredPython, scriptPath);
         }
 
-        var candidates = new List<string>
+        // Check colocated .venv beside the resolved script or inside AppContext.BaseDirectory
+        var scriptDir = Path.GetDirectoryName(Path.GetFullPath(scriptPath));
+        var pythonCandidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(scriptDir))
         {
-            AppContext.BaseDirectory,
-            Directory.GetCurrentDirectory()
-        };
+            pythonCandidates.Add(Path.Combine(scriptDir, ".venv", "bin", "python"));
+        }
+        pythonCandidates.Add(Path.Combine(AppContext.BaseDirectory, "tools", "audio_analyzer", ".venv", "bin", "python"));
 
-        // Traverse up parent directories from AppContext.BaseDirectory and CWD
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(home))
         {
-            candidates.Add(dir.FullName);
-            dir = dir.Parent;
+            pythonCandidates.Add(Path.Combine(home, ".local", "share", "cadence", "python-dsp", ".venv", "bin", "python"));
         }
 
-        var cwd = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (cwd != null)
+        // Local development / test fallback: if running from bin/Debug/net10.0 inside a repo with tools/audio_analyzer/.venv
+        var baseDir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int depth = 0; depth < 6 && baseDir != null; depth++, baseDir = baseDir.Parent)
         {
-            candidates.Add(cwd.FullName);
-            cwd = cwd.Parent;
+            pythonCandidates.Add(Path.Combine(baseDir.FullName, "tools", "audio_analyzer", ".venv", "bin", "python"));
         }
 
-        string? foundScript = null;
-        string? foundPython = _pythonPathOverride;
-
-        foreach (var candidate in candidates.Distinct())
-        {
-            var scriptCandidate = Path.Combine(candidate, "tools", "audio_analyzer", "analyze.py");
-            if (File.Exists(scriptCandidate))
-            {
-                foundScript = scriptCandidate;
-
-                if (foundPython == null)
-                {
-                    var venvPython = Path.Combine(candidate, "tools", "audio_analyzer", ".venv", "bin", "python");
-                    if (File.Exists(venvPython))
-                    {
-                        foundPython = venvPython;
-                    }
-                }
-                break;
-            }
-        }
-
-        foundScript ??= Path.Combine(Directory.GetCurrentDirectory(), "tools", "audio_analyzer", "analyze.py");
-        foundPython ??= "python3";
-
-        return (foundPython, foundScript);
+        var foundPython = pythonCandidates.FirstOrDefault(File.Exists) ?? "python3";
+        return (foundPython, scriptPath);
     }
 
     private static ObjectiveDspMetrics CreateUnavailableMetrics(string message)

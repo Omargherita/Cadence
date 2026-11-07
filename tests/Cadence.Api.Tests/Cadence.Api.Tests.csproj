@@ -6,7 +6,25 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <RunSettingsFilePath>$(MSBuildThisFileDirectory)../../.runsettings</RunSettingsFilePath>
+    <UserDotNetRoot Condition="Exists('$(HOME)/.dotnet/dotnet') and !Exists('/usr/share/dotnet/shared/Microsoft.AspNetCore.App')">$(HOME)/.dotnet</UserDotNetRoot>
   </PropertyGroup>
+
+  <Target Name="ConfigurePortableDotNetTestHost" BeforeTargets="VSTest" Condition="'$(UserDotNetRoot)' != ''">
+    <PropertyGroup>
+      <_GeneratedRunSettings>$(IntermediateOutputPath)portable.runsettings</_GeneratedRunSettings>
+      <_GeneratedRunSettingsContent><![CDATA[<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <DotNetHostPath>$(UserDotNetRoot)/dotnet</DotNetHostPath>
+    <EnvironmentVariables>
+      <DOTNET_ROOT>$(UserDotNetRoot)</DOTNET_ROOT>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>]]></_GeneratedRunSettingsContent>
+      <VSTestSetting>$(_GeneratedRunSettings)</VSTestSetting>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_GeneratedRunSettings)" Lines="$(_GeneratedRunSettingsContent)" Overwrite="true" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />

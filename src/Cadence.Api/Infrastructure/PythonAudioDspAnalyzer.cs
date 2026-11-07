@@ -6,16 +6,27 @@ namespace Cadence.Api.Infrastructure;
 
 public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
 {
+    private static readonly SemaphoreSlim ConcurrencyGate = new(2, 2);
+    private static readonly TimeSpan AnalysisTimeout = TimeSpan.FromSeconds(30);
+
     private readonly ILogger<PythonAudioDspAnalyzer> _logger;
+    private readonly string? _pythonPathOverride;
+    private readonly string? _scriptPathOverride;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public PythonAudioDspAnalyzer(ILogger<PythonAudioDspAnalyzer> logger)
+    public PythonAudioDspAnalyzer(
+        ILogger<PythonAudioDspAnalyzer> logger,
+        string? pythonPathOverride = null,
+        string? scriptPathOverride = null)
     {
         _logger = logger;
+        _pythonPathOverride = pythonPathOverride;
+        _scriptPathOverride = scriptPathOverride;
     }
 
     public async Task<ObjectiveDspMetrics> AnalyzeAudioAsync(string audioFilePath, CancellationToken ct = default)
@@ -33,6 +44,7 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
             return CreateUnavailableMetrics("Python DSP analyzer script not found on disk.");
         }
 
+        await ConcurrencyGate.WaitAsync(ct);
         var tempOutputFile = Path.Combine(Path.GetTempPath(), $"cadence_dsp_{Guid.NewGuid():N}.json");
 
         try
@@ -40,26 +52,17 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
             var psi = new ProcessStartInfo
             {
                 FileName = pythonPath,
-                Arguments = $"\"{scriptPath}\" \"{audioFilePath}\" --output \"{tempOutputFile}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add(scriptPath);
+            psi.ArgumentList.Add(audioFilePath);
+            psi.ArgumentList.Add("--output");
+            psi.ArgumentList.Add(tempOutputFile);
 
-            using var process = new Process { StartInfo = psi };
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
-
-            process.Start();
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
-
-            await process.WaitForExitAsync(cts.Token);
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
+            var (exitCode, stdout, stderr) = await MediaProcessingService.RunProcessWithTimeoutAsync(psi, AnalysisTimeout, ct);
 
             if (File.Exists(tempOutputFile))
             {
@@ -83,12 +86,12 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
             }
 
             var errSummary = !string.IsNullOrWhiteSpace(stderr) ? stderr : "No JSON output produced.";
-            _logger.LogWarning("DSP analyzer process exited with code {Code}: {Error}", process.ExitCode, errSummary);
-            return CreateUnavailableMetrics($"Analyzer exited with code {process.ExitCode}: {errSummary}");
+            _logger.LogWarning("DSP analyzer process exited with code {Code}: {Error}", exitCode, errSummary);
+            return CreateUnavailableMetrics($"Analyzer exited with code {exitCode}: {errSummary}");
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("DSP analysis timed out after 30 seconds for audio: {Path}", audioFilePath);
+            _logger.LogWarning("DSP analysis was cancelled or timed out after 30 seconds for audio: {Path}", audioFilePath);
             return CreateUnavailableMetrics("DSP audio analysis timed out (30s limit exceeded).");
         }
         catch (Exception ex)
@@ -109,15 +112,21 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
             {
                 // Ignored
             }
+            ConcurrencyGate.Release();
         }
     }
 
-    private static (string pythonPath, string scriptPath) ResolvePaths()
+    private (string pythonPath, string scriptPath) ResolvePaths()
     {
+        if (!string.IsNullOrWhiteSpace(_scriptPathOverride))
+        {
+            return (_pythonPathOverride ?? "python3", _scriptPathOverride);
+        }
+
         var candidates = new List<string>
         {
-            Directory.GetCurrentDirectory(),
-            AppContext.BaseDirectory
+            AppContext.BaseDirectory,
+            Directory.GetCurrentDirectory()
         };
 
         // Traverse up parent directories from AppContext.BaseDirectory and CWD
@@ -136,7 +145,7 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
         }
 
         string? foundScript = null;
-        string? foundPython = null;
+        string? foundPython = _pythonPathOverride;
 
         foreach (var candidate in candidates.Distinct())
         {
@@ -145,10 +154,13 @@ public class PythonAudioDspAnalyzer : IAudioDspAnalyzer
             {
                 foundScript = scriptCandidate;
 
-                var venvPython = Path.Combine(candidate, "tools", "audio_analyzer", ".venv", "bin", "python");
-                if (File.Exists(venvPython))
+                if (foundPython == null)
                 {
-                    foundPython = venvPython;
+                    var venvPython = Path.Combine(candidate, "tools", "audio_analyzer", ".venv", "bin", "python");
+                    if (File.Exists(venvPython))
+                    {
+                        foundPython = venvPython;
+                    }
                 }
                 break;
             }

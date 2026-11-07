@@ -1,30 +1,113 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
-DB_DIR="${HOME}/.local/share/cadence"
-DB_FILE="${DB_DIR}/db/app.db"
-if [ ! -f "${DB_FILE}" ] && [ -f "${DB_DIR}/cadence.db" ]; then
-    DB_FILE="${DB_DIR}/cadence.db"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+resolve_storage_root() {
+    if [ -n "${CADENCE_STORAGE_ROOT:-}" ]; then
+        printf '%s\n' "${CADENCE_STORAGE_ROOT}"
+        return
+    fi
+    if [ -n "${Cadence__StorageRoot:-}" ]; then
+        printf '%s\n' "${Cadence__StorageRoot}"
+        return
+    fi
+    local appsettings="${REPO_ROOT}/src/Cadence.Api/appsettings.json"
+    if [ -f "${appsettings}" ] && command -v python3 >/dev/null 2>&1; then
+        local configured
+        configured="$(python3 - "${appsettings}" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = json.load(f)
+    root = (data.get("Cadence") or {}).get("StorageRoot") or ""
+    if isinstance(root, str) and root.strip():
+        print(root.strip())
+except Exception:
+    pass
+PY
+)"
+        if [ -n "${configured}" ]; then
+            printf '%s\n' "${configured}"
+            return
+        fi
+    fi
+    printf '%s\n' "${HOME}/.local/share/cadence"
+}
+
+STORAGE_ROOT="$(resolve_storage_root)"
+DB_FILE="${STORAGE_ROOT}/db/app.db"
+if [ ! -f "${DB_FILE}" ] && [ -f "${STORAGE_ROOT}/cadence.db" ]; then
+    DB_FILE="${STORAGE_ROOT}/cadence.db"
 fi
-BACKUP_DIR="${DB_DIR}/backups"
+BACKUP_DIR="${STORAGE_ROOT}/backups"
+MEDIA_DIR="${STORAGE_ROOT}/media"
+RETENTION_COUNT="${CADENCE_BACKUP_RETENTION_COUNT:-30}"
 
 if [ ! -f "${DB_FILE}" ]; then
     echo "Cadence database not found at ${DB_FILE}. Skipping backup."
     exit 0
 fi
 
-mkdir -p "${BACKUP_DIR}"
+mkdir -p -m 700 "${STORAGE_ROOT}" "${BACKUP_DIR}"
+chmod 700 "${BACKUP_DIR}"
 
-TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-BACKUP_FILE="${BACKUP_DIR}/cadence-${TIMESTAMP}.db"
+LOCK_FILE="${BACKUP_DIR}/.backup.lock"
+exec 9>"${LOCK_FILE}"
+chmod 600 "${LOCK_FILE}"
+flock -w 60 9
+
+TIMESTAMP="$(date -u +%Y%m%d_%H%M%S_%3N)"
+RAND_SUFFIX="$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+BACKUP_NAME="cadence-${TIMESTAMP}-${RAND_SUFFIX}.db"
+BACKUP_FILE="${BACKUP_DIR}/${BACKUP_NAME}"
+STAGING_FILE="${BACKUP_DIR}/.${BACKUP_NAME}.tmp"
+
+cleanup_staging() {
+    if [ -n "${STAGING_FILE:-}" ] && [ -f "${STAGING_FILE}" ]; then
+        rm -f "${STAGING_FILE}"
+    fi
+}
+trap cleanup_staging EXIT
+
+if [ -e "${BACKUP_FILE}" ] || [ -e "${STAGING_FILE}" ]; then
+    echo "Error: Backup destination ${BACKUP_FILE} already exists." >&2
+    exit 1
+fi
 
 echo "Creating atomic SQLite online backup to ${BACKUP_FILE}..."
-sqlite3 "${DB_FILE}" ".backup '${BACKUP_FILE}'"
-
-# Ensure permissions
+ESCAPED_STAGING="${STAGING_FILE//\'/\'\'}"
+sqlite3 "${DB_FILE}" ".backup '${ESCAPED_STAGING}'"
+chmod 600 "${STAGING_FILE}"
+mv -n "${STAGING_FILE}" "${BACKUP_FILE}"
 chmod 600 "${BACKUP_FILE}"
 
-# Keep last 30 daily backups
-find "${BACKUP_DIR}" \( -name "cadence-*.db" -o -name "app_*.db" \) -mtime +30 -delete
+# Note: SQLite database backups do NOT contain score PDFs or recorded takes.
+# Sync the media directory separately into backups/media/.
+if [ -d "${MEDIA_DIR}" ]; then
+    MEDIA_BACKUP_DIR="${BACKUP_DIR}/media"
+    mkdir -p -m 700 "${MEDIA_BACKUP_DIR}"
+    chmod 700 "${MEDIA_BACKUP_DIR}"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete "${MEDIA_DIR}/" "${MEDIA_BACKUP_DIR}/"
+    else
+        find "${MEDIA_BACKUP_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        cp -a "${MEDIA_DIR}/." "${MEDIA_BACKUP_DIR}/"
+    fi
+fi
+
+# Retention policy: keep the newest RETENTION_COUNT database backups
+if [[ "${RETENTION_COUNT}" =~ ^[0-9]+$ ]] && [ "${RETENTION_COUNT}" -gt 0 ]; then
+    mapfile -t EXISTING_BACKUPS < <(
+        find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name "cadence-*.db" -o -name "app_*.db" \) -printf '%f\n' | LC_ALL=C sort -r
+    )
+    if [ "${#EXISTING_BACKUPS[@]}" -gt "${RETENTION_COUNT}" ]; then
+        for ((i = RETENTION_COUNT; i < ${#EXISTING_BACKUPS[@]}; i++)); do
+            rm -f "${BACKUP_DIR}/${EXISTING_BACKUPS[$i]}"
+        done
+    fi
+fi
 
 echo "Backup completed successfully: $(du -h "${BACKUP_FILE}" | cut -f1)"

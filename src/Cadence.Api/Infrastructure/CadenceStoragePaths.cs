@@ -10,9 +10,14 @@ public class CadenceStoragePaths
 
     public CadenceStoragePaths(string? explicitRootDir = null)
     {
-        if (!string.IsNullOrWhiteSpace(explicitRootDir))
+        var resolvedRoot = !string.IsNullOrWhiteSpace(explicitRootDir)
+            ? explicitRootDir
+            : Environment.GetEnvironmentVariable("CADENCE_STORAGE_ROOT")
+              ?? Environment.GetEnvironmentVariable("Cadence__StorageRoot");
+
+        if (!string.IsNullOrWhiteSpace(resolvedRoot))
         {
-            RootDir = explicitRootDir;
+            RootDir = Path.GetFullPath(resolvedRoot);
         }
         else
         {
@@ -28,8 +33,40 @@ public class CadenceStoragePaths
 
     public void EnsureDirectoriesCreated()
     {
-        Directory.CreateDirectory(DbDir);
-        Directory.CreateDirectory(MediaDir);
-        Directory.CreateDirectory(BackupsDir);
+        CreatePrivateDirectory(RootDir);
+        CreatePrivateDirectory(DbDir);
+        CreatePrivateDirectory(MediaDir);
+        CreatePrivateDirectory(BackupsDir);
+    }
+
+    public static void CreatePrivateDirectory(string path)
+    {
+        Directory.CreateDirectory(path);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            try
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+            catch
+            {
+                // Ignore if filesystem does not support POSIX permissions
+            }
+        }
+    }
+
+    public static void SetPrivateFilePermissions(string filePath)
+    {
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) && File.Exists(filePath))
+        {
+            try
+            {
+                File.SetUnixFileMode(filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            catch
+            {
+                // Ignore if filesystem does not support POSIX permissions
+            }
+        }
     }
 }

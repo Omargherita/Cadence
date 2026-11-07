@@ -102,6 +102,8 @@ public class CadenceDbContext : DbContext
             entity.HasKey(t => t.Id);
             entity.Property(t => t.TakeNumber)
                 .IsRequired();
+            entity.HasIndex(t => new { t.PracticeSessionId, t.TakeNumber })
+                .IsUnique();
             entity.Property(t => t.ObjectiveDspMetricsJson)
                 .IsRequired(false);
             entity.Property(t => t.CreatedAtUtc)

@@ -33,8 +33,89 @@ public static class DatabaseSchema
                     await db.Database.ExecuteSqlRawAsync("ALTER TABLE PracticeTakes ADD COLUMN ObjectiveDspMetricsJson TEXT;");
                 await db.Database.ExecuteSqlRawAsync("INSERT INTO CadenceSchemaVersions (Version) VALUES (1);");
             }
+            if (!await Exists("SELECT count(*) FROM CadenceSchemaVersions WHERE Version=2"))
+            {
+                await DeduplicatePracticeTakeNumbersAsync(db, transaction);
+                await db.Database.ExecuteSqlRawAsync(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS IX_PracticeTakes_PracticeSessionId_TakeNumber ON PracticeTakes (PracticeSessionId, TakeNumber);");
+                await db.Database.ExecuteSqlRawAsync("INSERT INTO CadenceSchemaVersions (Version) VALUES (2);");
+            }
             await transaction.CommitAsync();
         }
         finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    private static async Task DeduplicatePracticeTakeNumbersAsync(CadenceDbContext db, IDbContextTransaction transaction)
+    {
+        var conn = db.Database.GetDbConnection();
+        var affectedSessions = new List<string>();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = transaction.GetDbTransaction();
+            cmd.CommandText = @"
+                SELECT CAST(PracticeSessionId AS TEXT)
+                FROM PracticeTakes
+                GROUP BY PracticeSessionId, TakeNumber
+                HAVING COUNT(*) > 1
+                UNION
+                SELECT DISTINCT CAST(PracticeSessionId AS TEXT)
+                FROM PracticeTakes
+                WHERE TakeNumber <= 0;";
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                affectedSessions.Add(reader.GetString(0));
+            }
+        }
+
+        foreach (var sessionId in affectedSessions.Distinct())
+        {
+            var rows = new List<(string Id, int TakeNumber)>();
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = transaction.GetDbTransaction();
+                cmd.CommandText = @"
+                    SELECT CAST(Id AS TEXT), TakeNumber
+                    FROM PracticeTakes
+                    WHERE CAST(PracticeSessionId AS TEXT) = $sessionId
+                    ORDER BY TakeNumber ASC, CreatedAtUtc ASC, CAST(Id AS TEXT) ASC;";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "$sessionId";
+                p.Value = sessionId;
+                cmd.Parameters.Add(p);
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    rows.Add((reader.GetString(0), reader.GetInt32(1)));
+                }
+            }
+
+            int maxSeen = 0;
+            foreach (var (id, currentNum) in rows)
+            {
+                int targetNum = currentNum > maxSeen ? currentNum : maxSeen + 1;
+                maxSeen = targetNum;
+
+                if (targetNum != currentNum)
+                {
+                    await using var updateCmd = conn.CreateCommand();
+                    updateCmd.Transaction = transaction.GetDbTransaction();
+                    updateCmd.CommandText = "UPDATE PracticeTakes SET TakeNumber = $newNum WHERE CAST(Id AS TEXT) = $id;";
+                    var pNum = updateCmd.CreateParameter();
+                    pNum.ParameterName = "$newNum";
+                    pNum.Value = targetNum;
+                    updateCmd.Parameters.Add(pNum);
+
+                    var pId = updateCmd.CreateParameter();
+                    pId.ParameterName = "$id";
+                    pId.Value = id;
+                    updateCmd.Parameters.Add(pId);
+
+                    await updateCmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
     }
 }

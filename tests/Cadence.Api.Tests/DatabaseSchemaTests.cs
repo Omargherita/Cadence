@@ -54,4 +54,60 @@ public class DatabaseSchemaTests
         Assert.Empty(await db.Weaknesses.ToListAsync());
     }
 
+    [Fact]
+    public async Task SchemaUpgradeVersion2DeduplicatesExistingCollidingTakeNumbers()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"cadence-schema-v2-{Guid.NewGuid()}.db");
+        try
+        {
+            await using var db = new CadenceDbContext(new DbContextOptionsBuilder<CadenceDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options);
+            await db.Database.EnsureCreatedAsync();
+
+            // Simulate a pre-v2 database where IX_PracticeTakes_PracticeSessionId_TakeNumber did not exist
+            await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_PracticeTakes_PracticeSessionId_TakeNumber;");
+            await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS CadenceSchemaVersions (Version INTEGER PRIMARY KEY);");
+            await db.Database.ExecuteSqlRawAsync("INSERT INTO CadenceSchemaVersions (Version) VALUES (1);");
+
+            var piece = new Cadence.Api.Domain.MusicalLibrary.Piece { Id = Guid.CreateVersion7(), Title = "Piece", Composer = "Composer" };
+            var session = new Cadence.Api.Domain.MusicalLibrary.PracticeSession { Id = Guid.CreateVersion7(), PieceId = piece.Id };
+            var takeA = new Cadence.Api.Domain.PianoMentor.PracticeTake
+            {
+                Id = Guid.CreateVersion7(),
+                PracticeSessionId = session.Id,
+                TakeNumber = 2,
+                CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10)
+            };
+            var takeB = new Cadence.Api.Domain.PianoMentor.PracticeTake
+            {
+                Id = Guid.CreateVersion7(),
+                PracticeSessionId = session.Id,
+                TakeNumber = 2,
+                CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+            };
+
+            db.Pieces.Add(piece);
+            db.PracticeSessions.Add(session);
+            db.PracticeTakes.AddRange(takeA, takeB);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            // Run InitializeAsync to apply Version 2 migration
+            await DatabaseSchema.InitializeAsync(db);
+
+            var takes = await db.PracticeTakes
+                .Where(t => t.PracticeSessionId == session.Id)
+                .OrderBy(t => t.TakeNumber)
+                .ToListAsync();
+
+            Assert.Equal(2, takes.Count);
+            Assert.Equal(takeA.Id, takes[0].Id);
+            Assert.Equal(2, takes[0].TakeNumber);
+            Assert.Equal(takeB.Id, takes[1].Id);
+            Assert.Equal(3, takes[1].TakeNumber);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

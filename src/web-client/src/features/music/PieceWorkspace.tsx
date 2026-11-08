@@ -206,7 +206,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
       userSelfReflection: metadata.userSelfReflection, attachedPdfPages: metadata.attachedPdfPages,
       includeVideoPostureAnalysis: metadata.includeVideoPostureAnalysis,
       mediaBlob: metadata.file, originalFileName: metadata.file.name,
-      mimeType: metadata.file.type, createdAtUtc: new Date().toISOString(),
+      mimeType: recordingMimeType(metadata.file), createdAtUtc: new Date().toISOString(),
     };
     await cadenceRepository.queueOfflineTake(pendingTake);
     await syncEngine.processOutbox();
@@ -759,3 +759,5 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     </div>
   );
 };
+
+export function recordingMimeType(file: File): string { return file.type || ({mp4:"video/mp4",mp3:"audio/mpeg",wav:"audio/wav"}[file.name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream"); }

@@ -119,6 +119,7 @@ export class CadenceLocalDb extends Dexie {
 }
 
 export function mutationResource(item: Pick<OutboxItem,'operationType'|'endpoint'|'payload'>): string {
+  if(item.operationType==='LOG_SESSION') return `session:${item.payload?.id}`;
   if(item.operationType==='CREATE_TASK') return `task:${item.payload?.id}`;
   if(item.operationType==='CREATE_PIECE') return `piece:${item.payload?.id}`;
   return `${item.endpoint.startsWith('/api/tasks/') ? 'task' : 'piece'}:${item.endpoint.split('/')[3]}`;

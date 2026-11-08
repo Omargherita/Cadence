@@ -75,7 +75,7 @@ export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) 
       await db.transaction('rw',tables,async()=>{
         const piece=await db.pieces.get(pieceId);if(!piece)throw new Error('Piece not found');
         piece.sessions=[session,...piece.sessions];piece.lastPracticedAtUtc=startedAtUtc;piece.updatedAtUtc=new Date().toISOString();
-        await db.pieces.put(piece);await enqueue({operationType:'LOG_SESSION',endpoint:`/api/pieces/${pieceId}/sessions`,method:'POST',payload:{...req,id,startedAtUtc},resourceKey:`piece:${pieceId}`});
+        await db.pieces.put(piece);await enqueue({operationType:'LOG_SESSION',endpoint:`/api/pieces/${pieceId}/sessions`,method:'POST',payload:{...req,id,startedAtUtc},resourceKey:`session:${id}`});
       });engine.triggerSync(); await engine.refreshStatus();return session;
     },
     async queueOfflineTake(take:PendingTake) {

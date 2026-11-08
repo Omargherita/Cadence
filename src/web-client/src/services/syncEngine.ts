@@ -1,4 +1,4 @@
-import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision, mutationDependencies, providedKey } from './db';
+import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision, mutationDependencies, mutationResource, providedKey } from './db';
 import { TaskCompletionResponse, PendingTake } from '../types/cadence';
 import { api, buildApiError } from './api';
 
@@ -177,9 +177,9 @@ export class SyncEngine {
           const dependencies=item.dependencies ?? (entry.kind==='mutation' ? mutationDependencies(entry.item) : [`piece:${entry.item.pieceId}`,`session:${entry.item.sessionId}`]);
           if (!await this.dependenciesReady(dependencies, entry.kind==='take' ? entry.item.pieceId : undefined)) continue;
           if (entry.kind==='mutation') {
-            const resource=entry.item.resourceKey ?? entry.item.endpoint;
+            const resource=mutationResource(entry.item);
             const failed=await this.db.deadLetterOutbox.toArray();
-            if ([...mutations,...failed].some(other=>other.id!==item.id && (other.resourceKey ?? other.endpoint)===resource && (other.sequence ?? 0)<(item.sequence ?? 0))) continue;
+            if ([...mutations,...failed].some(other=>other.id!==item.id && mutationResource(other)===resource && (other.sequence ?? 0)<(item.sequence ?? 0))) continue;
           }
           attempted.add(item.id);
           try {

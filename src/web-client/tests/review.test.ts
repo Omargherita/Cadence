@@ -11,3 +11,11 @@ test('five rapid creates sync in order once without awaiting the network', async
  await new Promise(r=>setTimeout(r,20)); const active = syncEngine['isSyncing'];
  release(); expect(active).toBe(true); await syncEngine.processOutbox(); expect(sent).toEqual(['task-0','task-1','task-2','task-3','task-4']);
 });
+test('legacy piece resource keys do not let failed session A block session B', async () => {
+ const base={timestampUtc:'2026',operationType:'LOG_SESSION' as const,endpoint:'/api/pieces/p/sessions',method:'POST' as const,resourceKey:'piece:p',dependencies:['piece:p']};
+ await db.syncMeta.put({key:'ack:piece:p',value:1});
+ await db.deadLetterOutbox.put({...base,id:'a',sequence:1,payload:{id:'a'},failedAtUtc:'2026',failureReason:'invalid',httpStatus:400});
+ await db.syncOutbox.put({...base,id:'b',sequence:2,payload:{id:'b'}});
+ const sent:string[]=[];vi.stubGlobal('fetch',vi.fn(async (_url,init)=>{if(init?.method==='POST')sent.push(JSON.parse(String(init.body)).id);return Response.json([]);}));
+ await syncEngine.processOutbox();expect(sent).toEqual(['b']);
+});

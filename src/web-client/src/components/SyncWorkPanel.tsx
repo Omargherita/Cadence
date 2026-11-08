@@ -10,7 +10,7 @@ function download(blob:Blob,name:string) {
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 export function SyncWorkEntry({entry,busy,onRetry,onExport,onDiscard,onOpenSession}: {
-  entry:WorkEntry;busy:boolean;onRetry:(state?:boolean)=>void;onExport:()=>void;onDiscard:()=>void;onOpenSession:(pieceId:string,sessionId:string)=>void;
+  entry:WorkEntry;busy:boolean;onRetry:(state?:boolean)=>void;onExport:(recording?:boolean)=>void;onDiscard:()=>void;onOpenSession:(pieceId:string,sessionId:string)=>void;
 }) {
   const legacyToggle=entry.kind==='mutation' && (entry.item.operationType==='TOGGLE_TASK' || entry.item.endpoint.endsWith('/toggle'));
   const [desired,setDesired]=useState('');
@@ -28,7 +28,8 @@ export function SyncWorkEntry({entry,busy,onRetry,onExport,onDiscard,onOpenSessi
     {legacyToggle && <label>Choose the intended task state <select value={desired} onChange={e=>setDesired(e.target.value)}><option value="">Choose…</option><option value="true">Completed</option><option value="false">Open</option></select></label>}
     <div className="sync-work-actions">
       <button disabled={busy || (legacyToggle && !desired)} onClick={()=>onRetry(legacyToggle ? desired==='true' : undefined)}>Retry{entry.kind==='take'?' upload':''}</button>
-      <button disabled={busy} onClick={onExport}>{entry.kind==='take'?'Export recording + metadata':'Export operation'}</button>
+      <button disabled={busy} onClick={()=>onExport(false)}>Export details (JSON)</button>
+      {entry.kind==='take' && <button disabled={busy} onClick={()=>onExport(true)}>Download recording</button>}
       {entry.kind==='take' && <button onClick={()=>onOpenSession(entry.pieceId,entry.sessionId)}>Open session</button>}
       <button disabled={busy} onClick={onDiscard}>Mark resolved / discard</button>
     </div>
@@ -39,11 +40,11 @@ export function SyncWorkPanel({onClose,onOpenSession}: {onClose:()=>void;onOpenS
   const ref=useModalFocus(true,()=>{if(!busy)onClose();});
   useEffect(()=>syncEngine.subscribe(()=>{void syncEngine.listWork().then(setWork).catch(e=>setError(String(e)));}),[]);
   async function action(fn:()=>Promise<void>){setBusy(true);setError('');try{await fn();setWork(await syncEngine.listWork());}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
-  async function exportEntry(entry:WorkEntry){
+  async function exportEntry(entry:WorkEntry,recording=false){
     const data=await syncEngine.exportWork(entry.kind,entry.id);
-    // Both downloads remain local. JSON retains original legacy payloads and file metadata.
-    download(new Blob([JSON.stringify(data.metadata,null,2)],{type:'application/json'}),`cadence-${entry.id}.json`);
-    if(data.recording)download(data.recording,data.fileName ?? `${entry.id}.bin`);
+    // Each explicit action downloads one local file.
+    if(!recording) download(new Blob([JSON.stringify(data.metadata,null,2)],{type:'application/json'}),`cadence-${entry.id}.json`);
+    if(recording && data.recording)download(data.recording,data.fileName ?? `${entry.id}.bin`);
   }
   function discard(entry:WorkEntry){
     const message=entry.kind==='take'?'This recording will be deleted from this browser. Export it first if you need a copy. Mark resolved / discard?':'Remove this saved operation? Its local changes may be replaced by server state after sync. Export it first if needed.';
@@ -57,7 +58,7 @@ export function SyncWorkPanel({onClose,onOpenSession}: {onClose:()=>void;onOpenS
       {work[group].length===0 && <p className="secondary">No {group==='failed'?'work needs review':'pending work'}.</p>}
       {work[group].map(entry=><SyncWorkEntry key={`${entry.kind}:${entry.id}`} entry={entry} busy={busy}
         onRetry={state=>void action(async()=>{await syncEngine.retryWork(entry.kind,entry.id,state);await syncEngine.processOutbox();})}
-        onExport={()=>void action(()=>exportEntry(entry))} onDiscard={()=>discard(entry)}
+        onExport={recording=>void action(()=>exportEntry(entry,recording))} onDiscard={()=>discard(entry)}
         onOpenSession={(pieceId,sessionId)=>{onOpenSession(pieceId,sessionId);onClose();}} />)}
     </section>)}
   </section></div>,document.body);

@@ -31,7 +31,7 @@ export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) 
         await db.tasks.add(task);
         await enqueue({operationType:'CREATE_TASK',endpoint:'/api/tasks',method:'POST',payload:{...req,id},resourceKey:`task:${id}`});
       });
-      await engine.refreshStatus(); return task;
+      engine.triggerSync(); await engine.refreshStatus(); return task;
     },
     async toggleTask(id: string): Promise<TaskItem> {
       let result!: TaskItem;
@@ -54,20 +54,20 @@ export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) 
         await enqueue({operationType:'SET_COMPLETED',endpoint:`/api/tasks/${id}/completion`,method:'PATCH',payload:{isCompleted:task.isCompleted,clientDate:getTodayIsoDate(),nextOccurrenceId:nextId},resourceKey:`task:${id}`});
         result=task;
       });
-      await engine.refreshStatus();return result;
+      engine.triggerSync(); await engine.refreshStatus();return result;
     },
     async deleteTask(id:string) {
       await db.transaction('rw',tables,async()=>{
         await db.tasks.delete(id);
         await enqueue({operationType:'DELETE_TASK',endpoint:`/api/tasks/${id}`,method:'DELETE',resourceKey:`task:${id}`});
-      });await engine.refreshStatus();
+      });engine.triggerSync(); await engine.refreshStatus();
     },
     async createPiece(req:CreatePieceRequest):Promise<Piece> {
       const id=req.id || crypto.randomUUID();
       const piece:Piece={id,title:req.title,composer:req.composer,bucket:req.bucket,personalGoals:req.personalGoals ?? '',interpretationNotes:req.interpretationNotes ?? '',scoreCapabilityTier:'None',scoreFilePath:null,lastPracticedAtUtc:null,updatedAtUtc:new Date().toISOString(),sessions:[],weaknesses:[]};
       await db.transaction('rw',tables,async()=>{
         await db.pieces.add(piece);await enqueue({operationType:'CREATE_PIECE',endpoint:'/api/pieces',method:'POST',payload:{...req,id},resourceKey:`piece:${id}`});
-      });await engine.refreshStatus();return piece;
+      });engine.triggerSync(); await engine.refreshStatus();return piece;
     },
     async logPracticeSession(pieceId:string,req:CreatePracticeSessionRequest) {
       const id=req.id || crypto.randomUUID();const startedAtUtc=req.startedAtUtc ?? new Date().toISOString();
@@ -76,13 +76,13 @@ export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) 
         const piece=await db.pieces.get(pieceId);if(!piece)throw new Error('Piece not found');
         piece.sessions=[session,...piece.sessions];piece.lastPracticedAtUtc=startedAtUtc;piece.updatedAtUtc=new Date().toISOString();
         await db.pieces.put(piece);await enqueue({operationType:'LOG_SESSION',endpoint:`/api/pieces/${pieceId}/sessions`,method:'POST',payload:{...req,id,startedAtUtc},resourceKey:`piece:${pieceId}`});
-      });await engine.refreshStatus();return session;
+      });engine.triggerSync(); await engine.refreshStatus();return session;
     },
     async queueOfflineTake(take:PendingTake) {
-      await db.transaction('rw',tables,async()=>{const sequence=await bumpRevision(db);await db.pendingTakesOutbox.add({...take,sequence,dependencies:[`piece:${take.pieceId}`,`session:${take.sessionId}`]});});await engine.refreshStatus();
+      await db.transaction('rw',tables,async()=>{const sequence=await bumpRevision(db);await db.pendingTakesOutbox.add({...take,sequence,dependencies:[`piece:${take.pieceId}`,`session:${take.sessionId}`]});});engine.triggerSync(); await engine.refreshStatus();
     },
     async getPendingTakes(pieceId?:string,sessionId?:string) {return (await db.pendingTakesOutbox.toArray()).filter(t=>(!pieceId || t.pieceId===pieceId)&&(!sessionId || t.sessionId===sessionId)).sort((a,b)=>b.createdAtUtc.localeCompare(a.createdAtUtc));},
-    async deletePendingTake(id:string) {await db.transaction('rw',tables,async()=>{await db.pendingTakesOutbox.delete(id);await bumpRevision(db);});await engine.refreshStatus();},
+    async deletePendingTake(id:string) {await db.transaction('rw',tables,async()=>{await db.pendingTakesOutbox.delete(id);await bumpRevision(db);});engine.triggerSync(); await engine.refreshStatus();},
   };
 }
 export const cadenceRepository=createCadenceRepository(defaultDb,defaultEngine);

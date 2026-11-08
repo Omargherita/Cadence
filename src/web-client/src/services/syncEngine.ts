@@ -51,6 +51,7 @@ export class SyncEngine {
   }
   public get pauseReason() { return this.locks ? null : LOCKS_UNAVAILABLE; }
   public async runOnlineEdit(action:(signal:AbortSignal)=>Promise<void>):Promise<void> {
+    if(this.activeDrain) await this.activeDrain;
     if(!this.locks) throw new Error(LOCKS_UNAVAILABLE);
     await this.locks.request(OUTBOX_LOCK,{ifAvailable:true},async lock=>{
       if(!lock) throw new Error('Another tab is syncing. Try again shortly.');
@@ -60,7 +61,21 @@ export class SyncEngine {
       finally { clearTimeout(timer);controller.abort();await this.invalidateReads(); }
     });
   }
-  public async processOutbox(signal?:AbortSignal):Promise<{processed:number;remaining:number}> {
+  private activeDrain?: Promise<{processed:number;remaining:number}>;
+  private rescan = false;
+  public processOutbox(signal?:AbortSignal):Promise<{processed:number;remaining:number}> {
+    if(this.activeDrain) { this.rescan=true; return this.activeDrain; }
+    this.activeDrain=(async()=>{
+      let processed=0;let remaining=0;
+      do { this.rescan=false;const result=await this.processPass(signal);processed+=result.processed;remaining=result.remaining; } while(this.rescan && !signal?.aborted);
+      return {processed,remaining};
+    })().finally(()=>{this.activeDrain=undefined;});
+    return this.activeDrain;
+  }
+  public triggerSync() {
+    void this.processOutbox().catch(async error=>{this.lastError=String(error);await this.notify();});
+  }
+  private async processPass(signal?:AbortSignal):Promise<{processed:number;remaining:number}> {
     const skipped=async()=>({processed:0,remaining:await this.getPendingCount()});
     if(this.isSyncing) return skipped();
     this.isSyncing=true;

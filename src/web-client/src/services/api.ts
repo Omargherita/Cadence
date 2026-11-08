@@ -10,6 +10,7 @@ import {
   PracticeTake,
   TaskItem,
   ToggleTaskRequest,
+  TaskCompletionResponse,
 } from '../types/cadence';
 
 const BASE_URL = typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:5006/api';
@@ -66,8 +67,8 @@ export const api = {
     return res.json();
   },
 
-  async toggleTask(id: string, req?: ToggleTaskRequest): Promise<TaskItem> {
-    const res = await fetch(`${BASE_URL}/tasks/${id}/toggle`, {
+  async toggleTask(id: string, req: ToggleTaskRequest): Promise<TaskCompletionResponse> {
+    const res = await fetch(`${BASE_URL}/tasks/${id}/completion`, {
       method: 'PATCH',
       headers: req ? { 'Content-Type': 'application/json' } : undefined,
       body: req ? JSON.stringify(req) : undefined,

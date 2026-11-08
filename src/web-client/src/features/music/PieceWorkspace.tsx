@@ -23,7 +23,7 @@ import {
   PracticeTake,
   RepertoireBucket,
 } from '../../types/cadence';
-import { api, isPermanentApiError } from '../../services/api';
+import { api } from '../../services/api';
 import { cadenceRepository } from '../../services/cadenceRepository';
 import { syncEngine } from '../../services/syncEngine';
 import { formatDateTime, formatRelativeTime } from '../../utils/date';
@@ -194,39 +194,21 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     if (onRefresh) await onRefresh();
   };
 
-  const handleUploadTake = async (formData: FormData, metadata: TakeUploadMetadata) => {
+  const handleUploadTake = async (_formData: FormData, metadata: TakeUploadMetadata) => {
     if (!selectedSessionId) return;
-
-    try {
-      await api.uploadTake(piece.id, selectedSessionId, formData);
-      await loadTakesForSession(selectedSessionId);
-      await loadWeaknesses();
-      if (onRefresh) await onRefresh();
-    } catch (err: any) {
-      // The host answered and rejected the take (e.g. 400/404/413): retrying later can't help,
-      // so report it to the user rather than queueing it offline forever.
-      if (isPermanentApiError(err)) {
-        throw err;
-      }
-
-      console.warn('Network upload failed, queueing take offline in IndexedDB', err);
-      const pendingTake: PendingTake = {
-        id: crypto.randomUUID(),
-        pieceId: piece.id,
-        sessionId: selectedSessionId,
-        scope: metadata.scope,
-        targetSection: metadata.targetSection,
-        userSelfReflection: metadata.userSelfReflection,
-        attachedPdfPages: metadata.attachedPdfPages,
-        includeVideoPostureAnalysis: metadata.includeVideoPostureAnalysis,
-        mediaBlob: metadata.file,
-        originalFileName: metadata.file.name,
-        mimeType: metadata.file.type || (metadata.file.name.endsWith('.mp4') ? 'video/mp4' : 'audio/mp3'),
-        createdAtUtc: new Date().toISOString(),
-      };
-      await cadenceRepository.queueOfflineTake(pendingTake);
-      await loadPendingTakes();
-    }
+    const pendingTake: PendingTake = {
+      id: crypto.randomUUID(), pieceId: piece.id, sessionId: selectedSessionId,
+      scope: metadata.scope, targetSection: metadata.targetSection,
+      userSelfReflection: metadata.userSelfReflection, attachedPdfPages: metadata.attachedPdfPages,
+      includeVideoPostureAnalysis: metadata.includeVideoPostureAnalysis,
+      mediaBlob: metadata.file, originalFileName: metadata.file.name,
+      mimeType: metadata.file.type, createdAtUtc: new Date().toISOString(),
+    };
+    await cadenceRepository.queueOfflineTake(pendingTake);
+    await syncEngine.processOutbox();
+    await loadPendingTakes();
+    await loadTakesForSession(selectedSessionId);
+    if (onRefresh) await onRefresh();
   };
 
   const handleDeletePendingTake = async (id: string) => {

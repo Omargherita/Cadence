@@ -195,16 +195,23 @@ export interface PendingTake {
   /** Set when the host permanently rejected this take. Parked takes are skipped by the sync loop. */
   syncError?: string | null;
   syncFailedAtUtc?: string | null;
+  legacyReview?: boolean;
 }
 
 export interface ToggleTaskRequest {
+  isCompleted: boolean;
   /** Id of the next recurring occurrence the client already spawned optimistically. */
   nextOccurrenceId?: string;
   /** Client's local calendar date (YYYY-MM-DD), the recurrence base for unscheduled tasks. */
   clientDate?: string;
 }
 
+export interface TaskCompletionResponse { task: TaskItem; nextOccurrence: TaskItem | null; }
+
 export interface TaskItem {
+  seriesId?: string | null;
+  occurrenceDate?: string | null;
+  nextOccurrenceId?: string | null;
   id: string;
   title: string;
   category: TaskCategory;

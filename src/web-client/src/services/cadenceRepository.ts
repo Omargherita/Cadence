@@ -151,7 +151,8 @@ export const cadenceRepository = {
     const now = new Date().toISOString();
 
     // Body for the server: the local calendar date plus the id of any occurrence we spawn below.
-    const toggleReq: ToggleTaskRequest = { clientDate: getTodayIsoDate() };
+    if (!existing) throw new Error(`Task ${id} not found`);
+    const toggleReq: ToggleTaskRequest = { isCompleted: !existing.isCompleted, clientDate: getTodayIsoDate() };
 
     if (existing) {
       existing.isCompleted = !existing.isCompleted;
@@ -161,7 +162,7 @@ export const cadenceRepository = {
 
       // If task was completed and is recurring, optimistically schedule next occurrence
       if (existing.isCompleted && existing.recurrence && existing.recurrence !== 'None') {
-        const baseDate = existing.scheduledDate ?? getTodayIsoDate();
+        const baseDate = existing.occurrenceDate ?? existing.scheduledDate ?? getTodayIsoDate();
         let nextDateStr = baseDate;
         if (existing.recurrence === 'Daily') {
           nextDateStr = addDaysToIsoDate(baseDate, 1);
@@ -172,13 +173,15 @@ export const cadenceRepository = {
         }
 
         const alreadyExists = await db.tasks
-          .filter((t) => t.title === existing.title && t.scheduledDate === nextDateStr && !t.isCompleted)
+          .filter((t) => t.seriesId === (existing.seriesId ?? existing.id) && t.occurrenceDate === nextDateStr)
           .first();
 
         if (!alreadyExists) {
           const spawnedId = crypto.randomUUID();
           const spawnedTask: TaskItem = {
             id: spawnedId,
+            seriesId: existing.seriesId ?? existing.id,
+            occurrenceDate: nextDateStr,
             title: existing.title,
             category: existing.category,
             priority: existing.priority,
@@ -199,8 +202,8 @@ export const cadenceRepository = {
     if (pendingCount === 0) {
       try {
         const updatedOnServer = await api.toggleTask(id, toggleReq);
-        await db.tasks.put(updatedOnServer);
-        return updatedOnServer;
+        await syncEngine.applyCompletion(id, toggleReq.nextOccurrenceId, updatedOnServer);
+        return updatedOnServer.task;
       } catch {
         // Fall through to queueing
       }
@@ -209,8 +212,8 @@ export const cadenceRepository = {
     await db.syncOutbox.add({
       id: crypto.randomUUID(),
       timestampUtc: now,
-      operationType: 'TOGGLE_TASK',
-      endpoint: `/api/tasks/${id}/toggle`,
+      operationType: 'SET_COMPLETED',
+      endpoint: `/api/tasks/${id}/completion`,
       method: 'PATCH',
       payload: toggleReq,
     });

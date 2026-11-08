@@ -1,4 +1,5 @@
 import { db, OutboxItem } from './db';
+import { TaskCompletionResponse } from '../types/cadence';
 import { api, buildApiError } from './api';
 
 export interface SyncEngineStatus {
@@ -153,6 +154,7 @@ export class SyncEngine {
           const formData = new FormData();
           const file = new File([take.mediaBlob], take.originalFileName, { type: take.mimeType });
           formData.append('file', file);
+          formData.append('id', take.id);
           formData.append('scope', take.scope);
           formData.append('targetSection', take.targetSection);
           formData.append('userSelfReflection', take.userSelfReflection);
@@ -221,7 +223,21 @@ export class SyncEngine {
     });
   }
 
+  public async applyCompletion(id: string, proposedId: string | undefined, response: TaskCompletionResponse) {
+    await db.transaction('rw', db.tasks, db.syncOutbox, async () => {
+      const next = response.nextOccurrence;
+      if (proposedId && proposedId !== next?.id) {
+        const dependent = await db.syncOutbox.filter(i => i.endpoint.includes(`/${proposedId}/`) || i.endpoint.endsWith(`/${proposedId}`)).toArray();
+        if (next) for (const item of dependent) await db.syncOutbox.update(item.id, { endpoint: item.endpoint.replace(proposedId, next.id) });
+        if (!dependent.length || next) await db.tasks.delete(proposedId);
+      }
+      await db.tasks.put({ ...response.task, id, nextOccurrenceId: next?.id ?? null });
+      if (next) await db.tasks.put(next);
+    });
+  }
+
   private async executeMutation(item: OutboxItem): Promise<void> {
+    if (item.operationType === 'TOGGLE_TASK' || item.endpoint.endsWith('/toggle')) throw Object.assign(new Error('Legacy toggle requires review'), { status: 409 });
     const url = typeof window !== 'undefined' ? item.endpoint : `http://127.0.0.1:5006${item.endpoint}`;
     const res = await fetch(url, {
       method: item.method,
@@ -233,6 +249,7 @@ export class SyncEngine {
     if (!res.ok && !(res.status === 404 && item.method === 'DELETE')) {
       throw await buildApiError(res, 'HTTP ' + res.status);
     }
+    if (item.operationType === 'SET_COMPLETED') await this.applyCompletion(item.endpoint.split('/')[3], item.payload?.nextOccurrenceId, await res.json());
   }
 
   /**

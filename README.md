@@ -315,3 +315,20 @@ loads the explicit `fake-indexeddb` devDependency, but native imports of the syn
 modules fail on extensionless imports such as `./db`. No frontend runner or
 packages were added in 2a; resolve that runner/import choice in 2b and make its lock
 manager injectable for cross-tab tests.
+
+### Client synchronization upgrade (Batch 2b)
+
+Run frontend service regressions with `cd src/web-client && npm test` (Vitest and
+fake-indexeddb). Tests use synthetic databases and mocked HTTP calls.
+
+IndexedDB version 4 converts unambiguous queued toggles to explicit desired-state
+completion requests. Ambiguous recurring history or missing local tasks is parked
+for review, retaining original payloads. Legacy failed toggles also require review;
+no `/toggle` request is sent. The server's canonical successor ID is used on reply.
+
+All recordings already queued before this upgrade are parked, never automatically
+retried: an earlier upload may have succeeded under an unknown server-generated
+ID. Their blobs and metadata remain in this browser. Explicit retry uses the now
+stable local ID; check the session first to avoid duplicates. New recordings get
+an ID before their first send and flow normally. Empty legacy queues create no
+review entries. Recovery controls are described below as they become available.

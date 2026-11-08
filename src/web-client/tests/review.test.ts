@@ -51,3 +51,26 @@ test('null successor prevents resurrection and rapid toggles preserve the last d
  expect(await db.tasks.count()).toBe(1);expect((await db.tasks.get('t'))?.isCompleted).toBe(false);
  expect((await db.syncOutbox.orderBy('sequence').toArray()).map(i=>i.payload.isCompleted)).toEqual([true,false]);
 });
+test.each([500,'timeout'])('dependency %s persists visible retry and backoff',async(status)=>{
+ await orphanFixture();await db.syncOutbox.delete('parent');
+ vi.stubGlobal('fetch',vi.fn(async url=>{if(String(url).endsWith('/health'))return Response.json({});if(status==='timeout')throw new TypeError('timeout');return Response.json({error:'busy'},{status:500});}));
+ await syncEngine.processOutbox();const item=await db.syncOutbox.get('child');expect(item?.nextAttemptAt).toBeGreaterThan(Date.now());expect(item?.lastError).toBeTruthy();
+});
+test('syncDown backfills only real server acknowledgements including old sessions',async()=>{
+ vi.stubGlobal('fetch',vi.fn(async url=>Response.json(String(url).endsWith('/tasks')?[]:[{id:'p',sessions:[{id:'s'}]}])));
+ await syncEngine.syncDown();expect((await db.syncMeta.get('ack:session:s'))?.value).toBe(1);
+});
+test('optimistic piece with rejected create never receives an ack',async()=>{
+ await repo.createPiece({id:'p',title:'Local',composer:'C',bucket:'MainChallenge'});await syncEngine.processOutbox();
+ const item=(await db.syncOutbox.toArray())[0];await db.deadLetterOutbox.put({...item,failedAtUtc:'2026',failureReason:'rejected',httpStatus:400});await db.syncOutbox.clear();
+ vi.stubGlobal('fetch',vi.fn(async()=>Response.json([])));await syncEngine.syncDown();expect(await db.syncMeta.get('ack:piece:p')).toBeUndefined();
+});
+test.each([200,404])('task list response %s does not cascade',async(status)=>{
+ await db.syncOutbox.put({id:'complete',timestampUtc:'2026',operationType:'SET_COMPLETED',endpoint:'/api/tasks/missing/completion',method:'PATCH',payload:{isCompleted:true},dependencies:['task:missing']});
+ vi.stubGlobal('fetch',vi.fn(async url=>Response.json([], {status:String(url).endsWith('/health')?200:status})));await syncEngine.processOutbox();expect(await db.syncOutbox.get('complete')).toBeTruthy();expect(await db.deadLetterOutbox.count()).toBe(0);
+});
+test('successful dependency GET acknowledges server sessions without acknowledging optimistic siblings',async()=>{
+ await orphanFixture();await db.syncOutbox.delete('parent');
+ vi.stubGlobal('fetch',vi.fn(async (url,init)=>Response.json(String(url).endsWith('/p') && !init?.method?{id:'p',sessions:[{id:'existing'}]}:[])));
+ await syncEngine.processOutbox();expect((await db.syncMeta.get('ack:session:existing'))?.value).toBe(1);
+});

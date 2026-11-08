@@ -176,14 +176,15 @@ export class SyncEngine {
           if(entry.kind==='mutation' ? !await this.db.syncOutbox.get(item.id) : (await this.db.pendingTakesOutbox.get(item.id))?.syncError) continue;
           if (attempted.has(item.id) || (item.nextAttemptAt ?? 0)>Date.now()) continue;
           const dependencies=item.dependencies ?? (entry.kind==='mutation' ? mutationDependencies(entry.item) : [`piece:${entry.item.pieceId}`,`session:${entry.item.sessionId}`]);
-          if (!await this.dependenciesReady(dependencies, entry.kind==='take' ? entry.item.pieceId : undefined)) continue;
+
           if (entry.kind==='mutation') {
             const resource=mutationResource(entry.item);
             const failed=await this.db.deadLetterOutbox.toArray();
             if ([...mutations,...failed].some(other=>other.id!==item.id && mutationResource(other)===resource && (other.sequence ?? 0)<(item.sequence ?? 0))) continue;
           }
-          attempted.add(item.id);
           try {
+            if (!await this.dependenciesReady(dependencies, entry.kind==='take' ? entry.item.pieceId : undefined)) continue;
+            attempted.add(item.id);
             if(entry.kind==='mutation') {
               await this.executeMutation(entry.item);
               await this.db.transaction('rw',this.db.syncOutbox,this.db.syncMeta,async()=>{
@@ -198,6 +199,7 @@ export class SyncEngine {
             }
             processedCount++;progressed=true;
           } catch (error) {
+            attempted.add(item.id);
             const message=error instanceof Error ? error.message : 'Sync failed';
             this.lastError=message;
             const kind=classifyFailure(error);
@@ -319,6 +321,11 @@ export class SyncEngine {
     return form;
   }
 
+  private async ackServerRows(tasks:{id:string}[],pieces:{id:string;sessions:{id:string}[]}[]) {
+    const keys=[...tasks.map(t=>`task:${t.id}`),...pieces.flatMap(p=>[`piece:${p.id}`,...(p.sessions ?? []).map(s=>`session:${s.id}`)])];
+    await this.db.syncMeta.bulkPut(keys.map(key=>({key:`ack:${key}`,value:1})));
+  }
+
   private async dependenciesReady(keys: string[], pieceId?: string): Promise<boolean> {
     for(const key of keys) {
       if((await this.db.syncMeta.get(`ack:${key}`))?.value===1) continue;
@@ -327,12 +334,12 @@ export class SyncEngine {
       const [kind,id]=key.split(':');
       try {
         let found=false;
-        if(kind==='task') found=(await api.getTasks(undefined,this.signal)).some(task=>task.id===id);
-        if(kind==='piece') found=(await api.getPiece(id,this.signal)).id===id;
-        if(kind==='session' && pieceId) found=(await api.getPiece(pieceId,this.signal)).sessions.some(session=>session.id===id);
+        if(kind==='task') {const tasks=await api.getTasks(undefined,this.signal);await this.ackServerRows(tasks,[]);found=tasks.some(task=>task.id===id);}
+        if(kind==='piece') {const piece=await api.getPiece(id,this.signal);await this.ackServerRows([],[piece]);found=piece.id===id;}
+        if(kind==='session' && pieceId) {let piece;try{piece=await api.getPiece(pieceId,this.signal);}catch(error){if(getHttpStatus(error)===404){await this.parkChildren(`piece:${pieceId}`);return false;}throw error;}await this.ackServerRows([],[piece]);found=piece.sessions.some(session=>session.id===id);}
         if(!found) return false;
         await this.db.syncMeta.put({key:`ack:${key}`,value:1});
-      } catch(error) { if(getHttpStatus(error)===404){await this.parkChildren(key);return false;} return false; }
+      } catch(error) { if(getHttpStatus(error)===404 && kind==='task')throw new Error('Task list unavailable; cannot confirm this task is missing.'); if(getHttpStatus(error)===404 && kind!=='task'){await this.parkChildren(key);return false;} throw error; }
     }
     return true;
   }
@@ -418,6 +425,7 @@ export class SyncEngine {
         if (revision !== ((await this.db.syncMeta.get('revision'))?.value ?? 0) || await this.hasProtectedWork()) return;
         await this.db.tasks.clear();await this.db.tasks.bulkPut(tasks);
         await this.db.pieces.clear();await this.db.pieces.bulkPut(pieces);
+        await this.ackServerRows(tasks,pieces);
       });
       this.lastSyncedAtUtc=new Date().toISOString();await this.notify();
     } catch { /* Keep the offline cache. */ }

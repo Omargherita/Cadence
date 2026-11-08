@@ -196,6 +196,8 @@ export interface PendingTake {
   syncError?: string | null;
   syncFailedAtUtc?: string | null;
   legacyReview?: boolean;
+  sequence?: number;
+  dependencies?: string[];
 }
 
 export interface ToggleTaskRequest {

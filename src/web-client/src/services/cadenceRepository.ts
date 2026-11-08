@@ -1,13 +1,13 @@
 import { CreatePieceRequest, CreatePracticeSessionRequest, CreateTaskRequest, PendingTake, Piece, TaskItem } from '../types/cadence';
-import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision } from './db';
+import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision, mutationDependencies } from './db';
 import { syncEngine as defaultEngine, SyncEngine } from './syncEngine';
 import { addDaysToIsoDate, getNextWeekdayIso, getTodayIsoDate } from '../utils/date';
 
 export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) {
   const tables = [db.tasks, db.pieces, db.syncOutbox, db.pendingTakesOutbox, db.syncMeta];
   async function enqueue(item: Omit<OutboxItem, 'id' | 'timestampUtc'>) {
-    await bumpRevision(db);
-    await db.syncOutbox.add({ ...item, id: crypto.randomUUID(), timestampUtc: new Date().toISOString() });
+    const sequence = await bumpRevision(db);
+    await db.syncOutbox.add({ ...item, sequence, dependencies: mutationDependencies(item), id: crypto.randomUUID(), timestampUtc: new Date().toISOString() });
   }
   return {
     async getTasks(date?: string) {
@@ -79,7 +79,7 @@ export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) 
       });await engine.refreshStatus();return session;
     },
     async queueOfflineTake(take:PendingTake) {
-      await db.transaction('rw',tables,async()=>{await db.pendingTakesOutbox.add(take);await bumpRevision(db);});await engine.refreshStatus();
+      await db.transaction('rw',tables,async()=>{const sequence=await bumpRevision(db);await db.pendingTakesOutbox.add({...take,sequence,dependencies:[`piece:${take.pieceId}`,`session:${take.sessionId}`]});});await engine.refreshStatus();
     },
     async getPendingTakes(pieceId?:string,sessionId?:string) {return (await db.pendingTakesOutbox.toArray()).filter(t=>(!pieceId || t.pieceId===pieceId)&&(!sessionId || t.sessionId===sessionId)).sort((a,b)=>b.createdAtUtc.localeCompare(a.createdAtUtc));},
     async deletePendingTake(id:string) {await db.transaction('rw',tables,async()=>{await db.pendingTakesOutbox.delete(id);await bumpRevision(db);});await engine.refreshStatus();},

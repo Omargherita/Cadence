@@ -9,6 +9,7 @@ beforeEach(async()=> { await db.open(); });
 afterEach(async()=> { vi.unstubAllGlobals(); await db.delete(); });
 test('completion sends desired state, never a toggle', async()=>{
  await db.tasks.put(task);
+ await db.syncMeta.put({key:`ack:task:${task.id}`,value:1});
  const fetcher=vi.fn(async()=>Response.json({task:{...task,isCompleted:true},nextOccurrence:null}));vi.stubGlobal('fetch',fetcher);
  await cadenceRepository.toggleTask(task.id);
  await new SyncEngine().processOutbox();
@@ -17,6 +18,7 @@ test('completion sends desired state, never a toggle', async()=>{
 });
 test('retry carries the original take ID',async()=>{
  await db.pendingTakesOutbox.add(take);
+ await db.syncMeta.bulkPut([{key:"ack:piece:piece",value:1},{key:"ack:session:session",value:1}]);
  const ids:string[]=[];
  vi.stubGlobal('fetch',vi.fn(async(url,init)=>{ if(String(url).endsWith('/takes')){ids.push(init.body.get('id'));throw new TypeError('lost reply');}return Response.json({}); }));
  const engine=new SyncEngine();await engine.processOutbox();await engine.processOutbox();expect(ids).toEqual(['take','take']);

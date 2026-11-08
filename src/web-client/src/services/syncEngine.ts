@@ -1,5 +1,5 @@
-import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision } from './db';
-import { TaskCompletionResponse } from '../types/cadence';
+import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision, mutationDependencies, providedKey } from './db';
+import { TaskCompletionResponse, PendingTake } from '../types/cadence';
 import { api, buildApiError } from './api';
 
 export interface SyncEngineStatus {
@@ -111,92 +111,56 @@ export class SyncEngine {
         return { processed: 0, remaining: await this.getPendingCount() };
       }
 
-      const items = await this.db.syncOutbox.orderBy('timestampUtc').toArray();
       let processedCount = 0;
-
-      for (const item of items) {
-        try {
-          await this.executeMutation(item);
-          await this.db.transaction('rw', this.db.syncOutbox, this.db.syncMeta, async()=> { await this.db.syncOutbox.delete(item.id); await bumpRevision(this.db); });
-          processedCount++;
-          await this.notify();
-        } catch (err: any) {
-          console.warn(`Failed to replay mutation ${item.id} (${item.operationType}):`, err);
-          const message = err?.message || 'Sync failed';
-          const kind = classifyFailure(err);
-
-          if (kind === 'retry') {
-            // Transient outage: stop here so FIFO order is preserved and retry on the next tick.
-            this.lastError = message;
-            break;
+      const attempted = new Set<string>();
+      // Re-read after each acknowledgement so newly satisfied dependencies can run in this cycle.
+      for (;;) {
+        const mutations = await this.db.syncOutbox.toArray();
+        const takes = await this.db.pendingTakesOutbox.filter(t=>!t.syncError).toArray();
+        const work = [...mutations.map(item=>({kind:'mutation' as const,item})),...takes.map(item=>({kind:'take' as const,item}))]
+          .sort((a,b)=>(a.item.sequence ?? 0)-(b.item.sequence ?? 0)||a.item.id.localeCompare(b.item.id));
+        let progressed = false;
+        for (const entry of work) {
+          const item=entry.item;
+          if (attempted.has(item.id)) continue;
+          const dependencies=item.dependencies ?? (entry.kind==='mutation' ? mutationDependencies(entry.item) : [`piece:${entry.item.pieceId}`,`session:${entry.item.sessionId}`]);
+          if (!await this.dependenciesReady(dependencies, entry.kind==='take' ? entry.item.pieceId : undefined)) continue;
+          if (entry.kind==='mutation') {
+            const resource=entry.item.resourceKey ?? entry.item.endpoint;
+            const failed=await this.db.deadLetterOutbox.toArray();
+            if ([...mutations,...failed].some(other=>other.id!==item.id && (other.resourceKey ?? other.endpoint)===resource && (other.sequence ?? 0)<(item.sequence ?? 0))) continue;
           }
-
-          if (kind === 'server') {
-            const attempts = (item.attempts ?? 0) + 1;
-            if (attempts < MAX_SERVER_ERROR_ATTEMPTS) {
-              await this.db.syncOutbox.update(item.id, { attempts });
-              this.lastError = message;
-              break;
+          attempted.add(item.id);
+          try {
+            if(entry.kind==='mutation') {
+              await this.executeMutation(entry.item);
+              await this.db.transaction('rw',this.db.syncOutbox,this.db.syncMeta,async()=>{
+                const key=providedKey(entry.item);
+                // A completion acknowledges only the canonical successor returned by the server.
+                if(key && entry.item.operationType!=='SET_COMPLETED') await this.db.syncMeta.put({key:`ack:${key}`,value:1});
+                await this.db.syncOutbox.delete(item.id);await bumpRevision(this.db);
+              });
+            } else {
+              await api.uploadTake(entry.item.pieceId,entry.item.sessionId,this.takeForm(entry.item));
+              await this.db.transaction('rw',this.db.pendingTakesOutbox,this.db.syncMeta,async()=>{await this.db.pendingTakesOutbox.delete(item.id);await bumpRevision(this.db);});
             }
-          }
-
-          // Permanent rejection (or retry budget exhausted): park it so it can't wedge the queue,
-          // then keep going so later, independent mutations still sync.
-          await this.deadLetter(item, message, getHttpStatus(err));
-          this.lastError = `Discarded ${item.operationType}: ${message}`;
-          await this.notify();
-        }
-      }
-
-      // Replay pending offline practice takes (skipping ones the host already rejected)
-      const pendingTakes = await this.db.pendingTakesOutbox
-        .orderBy('createdAtUtc')
-        .filter((t) => !t.syncError)
-        .toArray();
-      for (const take of pendingTakes) {
-        try {
-          const formData = new FormData();
-          const file = new File([take.mediaBlob], take.originalFileName, { type: take.mimeType });
-          formData.append('file', file);
-          formData.append('id', take.id);
-          formData.append('scope', take.scope);
-          formData.append('targetSection', take.targetSection);
-          formData.append('userSelfReflection', take.userSelfReflection);
-          formData.append('attachedPdfPages', take.attachedPdfPages);
-          formData.append('includeVideoPostureAnalysis', take.includeVideoPostureAnalysis ? 'true' : 'false');
-          formData.append('sourceQuality', 'PhoneMicCompressed');
-
-          await api.uploadTake(take.pieceId, take.sessionId, formData);
-          await this.db.transaction('rw', this.db.pendingTakesOutbox, this.db.syncMeta, async()=> { await this.db.pendingTakesOutbox.delete(take.id); await bumpRevision(this.db); });
-          processedCount++;
-          await this.notify();
-        } catch (takeErr: any) {
-          console.warn(`Failed to replay pending take ${take.id}:`, takeErr);
-          const message = takeErr?.message || 'Take sync failed';
-          const kind = classifyFailure(takeErr);
-
-          if (kind === 'retry') {
-            this.lastError = message;
-            break;
-          }
-
-          if (kind === 'server') {
-            const attempts = (take.attempts ?? 0) + 1;
-            if (attempts < MAX_SERVER_ERROR_ATTEMPTS) {
-              await this.db.pendingTakesOutbox.update(take.id, { attempts });
-              this.lastError = message;
-              break;
+            processedCount++;progressed=true;
+          } catch (error) {
+            const message=error instanceof Error ? error.message : 'Sync failed';
+            this.lastError=message;
+            const kind=classifyFailure(error);
+            const attempts=(item.attempts ?? 0)+1;
+            if(kind==='retry') continue;
+            if(kind==='server' && attempts<MAX_SERVER_ERROR_ATTEMPTS) {
+              if(entry.kind==='mutation') await this.db.syncOutbox.update(item.id,{attempts});
+              else await this.db.pendingTakesOutbox.update(item.id,{attempts});
+              continue;
             }
+            if(entry.kind==='mutation') await this.deadLetter(entry.item,message,getHttpStatus(error));
+            else await this.db.pendingTakesOutbox.update(item.id,{syncError:message,syncFailedAtUtc:new Date().toISOString()});
           }
-
-          // Never delete the user's recording: keep the blob, mark it as rejected and move on.
-          await this.db.pendingTakesOutbox.update(take.id, {
-            syncError: message,
-            syncFailedAtUtc: new Date().toISOString(),
-          });
-          this.lastError = `Take rejected by host: ${message}`;
-          await this.notify();
         }
+        if(!progressed) break;
       }
 
       if (processedCount > 0) {
@@ -213,6 +177,33 @@ export class SyncEngine {
       this.isSyncing = false;
       await this.notify();
     }
+  }
+
+  private takeForm(take: PendingTake): FormData {
+    const form=new FormData();form.append('id',take.id);
+    form.append('file',new File([take.mediaBlob],take.originalFileName,{type:take.mimeType}));
+    form.append('scope',take.scope);form.append('targetSection',take.targetSection);
+    form.append('userSelfReflection',take.userSelfReflection);form.append('attachedPdfPages',take.attachedPdfPages);
+    form.append('includeVideoPostureAnalysis',String(take.includeVideoPostureAnalysis));form.append('sourceQuality','PhoneMicCompressed');
+    return form;
+  }
+
+  private async dependenciesReady(keys: string[], pieceId?: string): Promise<boolean> {
+    for(const key of keys) {
+      if((await this.db.syncMeta.get(`ack:${key}`))?.value===1) continue;
+      const providers=[...await this.db.syncOutbox.toArray(),...await this.db.deadLetterOutbox.toArray()];
+      if(providers.some(item=>providedKey(item)===key)) return false;
+      const [kind,id]=key.split(':');
+      try {
+        let found=false;
+        if(kind==='task') found=(await api.getTasks()).some(task=>task.id===id);
+        if(kind==='piece') found=(await api.getPiece(id)).id===id;
+        if(kind==='session' && pieceId) found=(await api.getPiece(pieceId)).sessions.some(session=>session.id===id);
+        if(!found) return false;
+        await this.db.syncMeta.put({key:`ack:${key}`,value:1});
+      } catch { return false; }
+    }
+    return true;
   }
 
   private async deadLetter(item: OutboxItem, reason: string, httpStatus: number | null): Promise<void> {
@@ -232,7 +223,7 @@ export class SyncEngine {
       const next = response.nextOccurrence;
       if (proposedId && proposedId !== next?.id) {
         const dependent = await this.db.syncOutbox.filter(i => i.endpoint.includes(`/${proposedId}/`) || i.endpoint.endsWith(`/${proposedId}`)).toArray();
-        if (next) for (const item of dependent) await this.db.syncOutbox.update(item.id, { endpoint: item.endpoint.replace(proposedId, next.id) });
+        if (next) for (const item of dependent) await this.db.syncOutbox.update(item.id, { endpoint: item.endpoint.replace(proposedId, next.id), resourceKey:`task:${next.id}`, dependencies:(item.dependencies ?? []).map(key=>key===`task:${proposedId}` ? `task:${next.id}` : key) });
         if (!dependent.length || next) await this.db.tasks.delete(proposedId);
       }
       const queued = await this.db.syncOutbox.toArray();
@@ -240,6 +231,8 @@ export class SyncEngine {
       const taskOps = queued.filter(i => i.endpoint === `/api/tasks/${id}/completion` || (i.method === 'DELETE' && i.endpoint === `/api/tasks/${id}`));
       if (taskOps.length <= 1) await this.db.tasks.put({ ...response.task, id, nextOccurrenceId: next?.id ?? null });
       if (next && !queued.some(i => i.endpoint.includes(`/${next.id}`))) await this.db.tasks.put(next);
+      await this.db.syncMeta.put({key:`ack:task:${id}`,value:1});
+      if(next) await this.db.syncMeta.put({key:`ack:task:${next.id}`,value:1});
       await bumpRevision(this.db);
     });
   }

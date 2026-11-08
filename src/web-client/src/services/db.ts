@@ -19,6 +19,8 @@ export interface OutboxItem {
   /** Number of server-side (5xx) failures so far; network outages are not counted. */
   attempts?: number;
   resourceKey?: string;
+  sequence?: number;
+  dependencies?: string[];
   originalOperations?: Pick<OutboxItem, 'id' | 'timestampUtc' | 'operationType' | 'endpoint' | 'method' | 'payload'>[];
 }
 
@@ -95,7 +97,38 @@ export class CadenceLocalDb extends Dexie {
 
     this.version(5).stores({ syncMeta: 'key' });
 
+    this.version(6).stores({syncOutbox:'id,sequence,operationType',pendingTakesOutbox:'id,sequence,pieceId,sessionId,createdAtUtc'}).upgrade(async tx=>{
+      const mutations = await tx.table('syncOutbox').toArray() as OutboxItem[];
+      const takes = await tx.table('pendingTakesOutbox').toArray() as PendingTake[];
+      // Legacy timestamps cannot reconstruct enqueue order. Dependencies repair parent ordering.
+      const work = [...mutations.map(item=>({item,time:item.timestampUtc,table:'syncOutbox'})),...takes.map(item=>({item,time:item.createdAtUtc,table:'pendingTakesOutbox'}))].sort((a,b)=>a.time.localeCompare(b.time)||a.item.id.localeCompare(b.item.id));
+      let sequence=(await tx.table('syncMeta').get('revision'))?.value ?? 0;
+      for (const entry of work) {
+        const dependencies = entry.table === 'syncOutbox' ? mutationDependencies(entry.item as OutboxItem) : [`piece:${(entry.item as PendingTake).pieceId}`,`session:${(entry.item as PendingTake).sessionId}`];
+        await tx.table(entry.table).update(entry.item.id,{sequence:++sequence,dependencies,...(entry.table==='syncOutbox' ? {resourceKey:mutationResource(entry.item as OutboxItem)} : {})});
+      }
+      await tx.table('deadLetterOutbox').toCollection().modify((item:DeadLetterItem)=>{item.resourceKey ??= mutationResource(item);});
+      await tx.table('syncMeta').put({key:'revision',value:sequence});
+    });
+
   }
+}
+
+export function mutationResource(item: Pick<OutboxItem,'operationType'|'endpoint'|'payload'>): string {
+  if(item.operationType==='CREATE_TASK') return `task:${item.payload?.id}`;
+  if(item.operationType==='CREATE_PIECE') return `piece:${item.payload?.id}`;
+  return `${item.endpoint.startsWith('/api/tasks/') ? 'task' : 'piece'}:${item.endpoint.split('/')[3]}`;
+}
+export function mutationDependencies(item: Pick<OutboxItem,'operationType'|'endpoint'|'payload'>): string[] {
+  if (item.operationType === 'LOG_SESSION') return [`piece:${item.endpoint.split('/')[3]}`];
+  if (item.operationType === 'SET_COMPLETED' || item.operationType === 'DELETE_TASK') return [`task:${item.endpoint.split('/')[3]}`];
+  return [];
+}
+export function providedKey(item: OutboxItem): string | undefined {
+  if (item.operationType === 'CREATE_PIECE') return `piece:${item.payload?.id}`;
+  if (item.operationType === 'CREATE_TASK') return `task:${item.payload?.id}`;
+  if (item.operationType === 'LOG_SESSION') return `session:${item.payload?.id}`;
+  if (item.operationType === 'SET_COMPLETED' && item.payload?.nextOccurrenceId) return `task:${item.payload.nextOccurrenceId}`;
 }
 
 export async function bumpRevision(database: CadenceLocalDb): Promise<number> {

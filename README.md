@@ -339,3 +339,10 @@ any queued, failed, or parked work exists. This deliberately favors retained loc
 intent over refreshing unrelated rows until that work is resolved. RecordEditor
 remains online-only; it refuses edits while protected work exists and guards its
 cache writes against operations arriving during a request.
+
+IndexedDB version 6 assigns a monotonic enqueue sequence shared by mutations and
+recordings, independent of practice dates. Piece/session acknowledgements gate
+uploads; unresolved or failed parents keep children pending without consuming
+retry attempts. Existing parents are verified against the host when their local
+acknowledgement is unknown. Legacy timestamps are used only to seed deterministic
+migration order; dependencies enforce parent order even for backdated sessions.

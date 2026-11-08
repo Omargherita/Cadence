@@ -1,4 +1,4 @@
-import { db, OutboxItem } from './db';
+import { db as defaultDb, CadenceLocalDb, OutboxItem, bumpRevision } from './db';
 import { TaskCompletionResponse } from '../types/cadence';
 import { api, buildApiError } from './api';
 
@@ -37,6 +37,10 @@ function classifyFailure(err: unknown): FailureKind {
 }
 
 export class SyncEngine {
+  constructor(private readonly db: CadenceLocalDb = defaultDb) {}
+  public async refreshStatus() { await this.notify(); }
+  public async invalidateReads() { await this.db.transaction('rw', this.db.syncMeta, () => bumpRevision(this.db)); }
+  public async hasProtectedWork() { return (await this.getPendingCount()) + (await this.getFailedCount()) > 0; }
   private isSyncing = false;
   private listeners: ((status: SyncEngineStatus) => void)[] = [];
   private lastSyncedAtUtc: string | null = null;
@@ -67,20 +71,20 @@ export class SyncEngine {
 
   /** Mutations still waiting to be replayed. Excludes dead-lettered items and parked takes. */
   public async getPendingMutationCount(): Promise<number> {
-    return db.syncOutbox.count();
+    return this.db.syncOutbox.count();
   }
 
   /** All work still waiting to sync (mutations + takes). Parked (rejected) takes are not "pending". */
   public async getPendingCount(): Promise<number> {
-    const pendingMutations = await db.syncOutbox.count();
-    const pendingTakes = await db.pendingTakesOutbox.filter((t) => !t.syncError).count();
+    const pendingMutations = await this.db.syncOutbox.count();
+    const pendingTakes = await this.db.pendingTakesOutbox.filter((t) => !t.syncError).count();
     return pendingMutations + pendingTakes;
   }
 
   /** Items the host permanently rejected (dead-lettered mutations + parked takes). */
   public async getFailedCount(): Promise<number> {
-    const deadLetters = await db.deadLetterOutbox.count();
-    const parkedTakes = await db.pendingTakesOutbox.filter((t) => Boolean(t.syncError)).count();
+    const deadLetters = await this.db.deadLetterOutbox.count();
+    const parkedTakes = await this.db.pendingTakesOutbox.filter((t) => Boolean(t.syncError)).count();
     return deadLetters + parkedTakes;
   }
 
@@ -107,13 +111,13 @@ export class SyncEngine {
         return { processed: 0, remaining: await this.getPendingCount() };
       }
 
-      const items = await db.syncOutbox.orderBy('timestampUtc').toArray();
+      const items = await this.db.syncOutbox.orderBy('timestampUtc').toArray();
       let processedCount = 0;
 
       for (const item of items) {
         try {
           await this.executeMutation(item);
-          await db.syncOutbox.delete(item.id);
+          await this.db.transaction('rw', this.db.syncOutbox, this.db.syncMeta, async()=> { await this.db.syncOutbox.delete(item.id); await bumpRevision(this.db); });
           processedCount++;
           await this.notify();
         } catch (err: any) {
@@ -130,7 +134,7 @@ export class SyncEngine {
           if (kind === 'server') {
             const attempts = (item.attempts ?? 0) + 1;
             if (attempts < MAX_SERVER_ERROR_ATTEMPTS) {
-              await db.syncOutbox.update(item.id, { attempts });
+              await this.db.syncOutbox.update(item.id, { attempts });
               this.lastError = message;
               break;
             }
@@ -145,7 +149,7 @@ export class SyncEngine {
       }
 
       // Replay pending offline practice takes (skipping ones the host already rejected)
-      const pendingTakes = await db.pendingTakesOutbox
+      const pendingTakes = await this.db.pendingTakesOutbox
         .orderBy('createdAtUtc')
         .filter((t) => !t.syncError)
         .toArray();
@@ -163,7 +167,7 @@ export class SyncEngine {
           formData.append('sourceQuality', 'PhoneMicCompressed');
 
           await api.uploadTake(take.pieceId, take.sessionId, formData);
-          await db.pendingTakesOutbox.delete(take.id);
+          await this.db.transaction('rw', this.db.pendingTakesOutbox, this.db.syncMeta, async()=> { await this.db.pendingTakesOutbox.delete(take.id); await bumpRevision(this.db); });
           processedCount++;
           await this.notify();
         } catch (takeErr: any) {
@@ -179,14 +183,14 @@ export class SyncEngine {
           if (kind === 'server') {
             const attempts = (take.attempts ?? 0) + 1;
             if (attempts < MAX_SERVER_ERROR_ATTEMPTS) {
-              await db.pendingTakesOutbox.update(take.id, { attempts });
+              await this.db.pendingTakesOutbox.update(take.id, { attempts });
               this.lastError = message;
               break;
             }
           }
 
           // Never delete the user's recording: keep the blob, mark it as rejected and move on.
-          await db.pendingTakesOutbox.update(take.id, {
+          await this.db.pendingTakesOutbox.update(take.id, {
             syncError: message,
             syncFailedAtUtc: new Date().toISOString(),
           });
@@ -212,27 +216,31 @@ export class SyncEngine {
   }
 
   private async deadLetter(item: OutboxItem, reason: string, httpStatus: number | null): Promise<void> {
-    await db.transaction('rw', db.syncOutbox, db.deadLetterOutbox, async () => {
-      await db.deadLetterOutbox.put({
+    await this.db.transaction('rw', this.db.syncOutbox, this.db.deadLetterOutbox, async () => {
+      await this.db.deadLetterOutbox.put({
         ...item,
         failedAtUtc: new Date().toISOString(),
         failureReason: reason,
         httpStatus,
       });
-      await db.syncOutbox.delete(item.id);
+      await this.db.syncOutbox.delete(item.id);
     });
   }
 
   public async applyCompletion(id: string, proposedId: string | undefined, response: TaskCompletionResponse) {
-    await db.transaction('rw', db.tasks, db.syncOutbox, async () => {
+    await this.db.transaction('rw', this.db.tasks, this.db.syncOutbox, this.db.syncMeta, async () => {
       const next = response.nextOccurrence;
       if (proposedId && proposedId !== next?.id) {
-        const dependent = await db.syncOutbox.filter(i => i.endpoint.includes(`/${proposedId}/`) || i.endpoint.endsWith(`/${proposedId}`)).toArray();
-        if (next) for (const item of dependent) await db.syncOutbox.update(item.id, { endpoint: item.endpoint.replace(proposedId, next.id) });
-        if (!dependent.length || next) await db.tasks.delete(proposedId);
+        const dependent = await this.db.syncOutbox.filter(i => i.endpoint.includes(`/${proposedId}/`) || i.endpoint.endsWith(`/${proposedId}`)).toArray();
+        if (next) for (const item of dependent) await this.db.syncOutbox.update(item.id, { endpoint: item.endpoint.replace(proposedId, next.id) });
+        if (!dependent.length || next) await this.db.tasks.delete(proposedId);
       }
-      await db.tasks.put({ ...response.task, id, nextOccurrenceId: next?.id ?? null });
-      if (next) await db.tasks.put(next);
+      const queued = await this.db.syncOutbox.toArray();
+      // Keep the latest local desired state when an older completion reply arrives.
+      const taskOps = queued.filter(i => i.endpoint === `/api/tasks/${id}/completion` || (i.method === 'DELETE' && i.endpoint === `/api/tasks/${id}`));
+      if (taskOps.length <= 1) await this.db.tasks.put({ ...response.task, id, nextOccurrenceId: next?.id ?? null });
+      if (next && !queued.some(i => i.endpoint.includes(`/${next.id}`))) await this.db.tasks.put(next);
+      await bumpRevision(this.db);
     });
   }
 
@@ -260,30 +268,18 @@ export class SyncEngine {
    * vanish from the UI until they replay.
    */
   public async syncDown(): Promise<void> {
+    const revision = (await this.db.syncMeta.get('revision'))?.value ?? 0;
     try {
-      const [tasks, pieces] = await Promise.all([
-        api.getTasks(),
-        api.getPieces(),
-      ]);
-
-      await db.transaction('rw', db.tasks, db.pieces, db.syncOutbox, async () => {
-        if ((await db.syncOutbox.count()) > 0) {
-          return;
-        }
-
-        await db.tasks.clear();
-        await db.tasks.bulkPut(tasks);
-
-        await db.pieces.clear();
-        await db.pieces.bulkPut(pieces);
+      const [tasks,pieces] = await Promise.all([api.getTasks(),api.getPieces()]);
+      await this.db.transaction('rw', [this.db.tasks,this.db.pieces,this.db.syncOutbox,this.db.deadLetterOutbox,this.db.pendingTakesOutbox,this.db.syncMeta], async()=>{
+        if (revision !== ((await this.db.syncMeta.get('revision'))?.value ?? 0) || await this.hasProtectedWork()) return;
+        await this.db.tasks.clear();await this.db.tasks.bulkPut(tasks);
+        await this.db.pieces.clear();await this.db.pieces.bulkPut(pieces);
       });
-
-      this.lastSyncedAtUtc = new Date().toISOString();
-      await this.notify();
-    } catch (err) {
-      console.warn('Sync down failed, keeping local offline cache', err);
-    }
+      this.lastSyncedAtUtc=new Date().toISOString();await this.notify();
+    } catch { /* Keep the offline cache. */ }
   }
+
 }
 
 export const syncEngine = new SyncEngine();

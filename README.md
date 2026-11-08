@@ -332,3 +332,10 @@ ID. Their blobs and metadata remain in this browser. Explicit retry uses the now
 stable local ID; check the session first to avoid duplicates. New recordings get
 an ID before their first send and flow normally. Empty legacy queues create no
 review entries. Recovery controls are described below as they become available.
+
+Local task/piece/session changes and their queue entries now commit in one Dexie
+transaction. Downloads use a local revision guard and preserve the cache while
+any queued, failed, or parked work exists. This deliberately favors retained local
+intent over refreshing unrelated rows until that work is resolved. RecordEditor
+remains online-only; it refuses edits while protected work exists and guards its
+cache writes against operations arriving during a request.

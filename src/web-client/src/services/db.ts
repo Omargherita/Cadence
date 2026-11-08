@@ -18,6 +18,7 @@ export interface OutboxItem {
   payload?: any;
   /** Number of server-side (5xx) failures so far; network outages are not counted. */
   attempts?: number;
+  resourceKey?: string;
   originalOperations?: Pick<OutboxItem, 'id' | 'timestampUtc' | 'operationType' | 'endpoint' | 'method' | 'payload'>[];
 }
 
@@ -34,6 +35,8 @@ export class CadenceLocalDb extends Dexie {
   syncOutbox!: Table<OutboxItem, string>;
   pendingTakesOutbox!: Table<PendingTake, string>;
   deadLetterOutbox!: Table<DeadLetterItem, string>;
+
+  syncMeta!: Table<{ key: string; value: number }, string>;
 
   constructor(name = 'CadenceLocalDb') {
     super(name);
@@ -90,7 +93,15 @@ export class CadenceLocalDb extends Dexie {
       });
     });
 
+    this.version(5).stores({ syncMeta: 'key' });
+
   }
+}
+
+export async function bumpRevision(database: CadenceLocalDb): Promise<number> {
+  const value = ((await database.syncMeta.get('revision'))?.value ?? 0) + 1;
+  await database.syncMeta.put({ key: 'revision', value });
+  return value;
 }
 
 export const db = new CadenceLocalDb();

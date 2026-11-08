@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { useModalFocus } from './useModalFocus';
 import { useState } from 'react';
-import { db } from '../services/db';
+import { db, bumpRevision } from '../services/db';
 import { syncEngine } from '../services/syncEngine';
 import { buildApiError } from '../services/api';
 
@@ -19,26 +19,33 @@ export function RecordEditor({ endpoint, value, fields, onSaved, allowDelete = t
     if (deleted && !window.confirm('Delete this record and its associated records?')) return;
     setBusy(true); setError('');
     try {
-      if (await syncEngine.getPendingCount()) throw new Error('Wait for pending changes to sync before editing or deleting.');
+      if (await syncEngine.hasProtectedWork()) throw new Error('Resolve queued and failed work before editing or deleting.');
+      await syncEngine.invalidateReads();
       const res = await fetch(endpoint, { method: deleted ? 'DELETE' : 'PUT',
         headers: { 'Content-Type': 'application/json' }, body: deleted ? undefined : JSON.stringify(draft) });
       if (!res.ok) throw await buildApiError(res, 'Could not save changes');
-      if (endpoint.startsWith('/api/tasks/')) {
-        if (deleted) await db.tasks.delete((value as { id: string }).id);
-        else await db.tasks.put(await res.json());
-      } else {
-        const id = endpoint.split('/')[3];
-        if (deleted && endpoint === `/api/pieces/${id}`) {
-          await db.pieces.delete(id);
-          await db.pendingTakesOutbox.where('pieceId').equals(id).delete();
-        } else {
-          const refreshed = await fetch(`/api/pieces/${id}`);
-          if (refreshed.ok) await db.pieces.put(await refreshed.json());
-        }
+      const taskEndpoint = endpoint.startsWith('/api/tasks/');
+      const pieceId = endpoint.split('/')[3];
+      const deletingPiece = deleted && endpoint === `/api/pieces/${pieceId}`;
+      let refreshed: any;
+      if (taskEndpoint && !deleted) refreshed = await res.json();
+      else if (!taskEndpoint && !deletingPiece) {
+        const response = await fetch(`/api/pieces/${pieceId}`);
+        if (response.ok) refreshed = await response.json();
       }
+      await db.transaction('rw', [db.tasks,db.pieces,db.syncOutbox,db.deadLetterOutbox,db.pendingTakesOutbox,db.syncMeta], async()=> {
+        // A local operation may have arrived while the direct edit request was running.
+        if (await syncEngine.hasProtectedWork()) throw new Error('Saved on server; newer local work is retained. Resolve sync work before refreshing this record.');
+        if (taskEndpoint) {
+          if (deleted) await db.tasks.delete((value as {id:string}).id);
+          else await db.tasks.put(refreshed);
+        } else if (deletingPiece) await db.pieces.delete(pieceId);
+        else if (refreshed) await db.pieces.put(refreshed);
+        await bumpRevision(db);
+      });
       await onSaved(deleted); setOpen(false);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save changes'); }
-    finally { setBusy(false); }
+    finally { await syncEngine.invalidateReads(); setBusy(false); }
   }
   return <span onClick={e => e.stopPropagation()}>
     <button type="button" className="text-xs text-blue-300 px-2" onClick={() => { setDraft({ ...value }); setOpen(true); }}>Edit</button>

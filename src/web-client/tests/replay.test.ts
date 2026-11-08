@@ -11,6 +11,7 @@ test('completion sends desired state, never a toggle', async()=>{
  await db.tasks.put(task);
  const fetcher=vi.fn(async()=>Response.json({task:{...task,isCompleted:true},nextOccurrence:null}));vi.stubGlobal('fetch',fetcher);
  await cadenceRepository.toggleTask(task.id);
+ await new SyncEngine().processOutbox();
  const request=fetcher.mock.calls.find(c=>String(c[0]).includes('/completion'));
  expect(request).toBeTruthy();expect(JSON.parse(request![1].body as string).isCompleted).toBe(true);
 });

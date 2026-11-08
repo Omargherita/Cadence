@@ -19,7 +19,7 @@ export function createCadenceRepository(db: CadenceLocalDb, engine: SyncEngine) 
     async getPieces() {
       await engine.syncDown();
       const order = { MainChallenge: 0, Maintenance: 1, FutureExploration: 2 };
-      return (await db.pieces.toArray()).sort((a,b) => order[a.bucket]-order[b.bucket] || (b.lastPracticedAtUtc ?? '').localeCompare(a.lastPracticedAtUtc ?? ''));
+      return (await db.pieces.toArray()).sort((a,b) => order[a.bucket]-order[b.bucket] || b.updatedAtUtc.localeCompare(a.updatedAtUtc));
     },
     async createTask(req: CreateTaskRequest): Promise<TaskItem> {
       const id = req.id || crypto.randomUUID();

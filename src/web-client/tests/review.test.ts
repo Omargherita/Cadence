@@ -38,3 +38,10 @@ test.each([404,500,'timeout'])('dependency response %s only cascades on explicit
  await syncEngine.processOutbox();
  expect((await syncEngine.listWork()).failed.length).toBe(status===404?2:0);
 });
+test('pieces sort by update time within their bucket',async()=>{
+ await repo.createPiece({id:'old',title:'Old',composer:'C',bucket:'MainChallenge'});
+ await repo.createPiece({id:'new',title:'New',composer:'C',bucket:'MainChallenge'});
+ await db.pieces.update('old',{updatedAtUtc:'2020',lastPracticedAtUtc:'2030'});
+ await db.pieces.update('new',{updatedAtUtc:'2026',lastPracticedAtUtc:null});
+ expect((await repo.getPieces()).map(p=>p.id)).toEqual(['new','old']);
+});

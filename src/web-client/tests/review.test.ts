@@ -19,3 +19,22 @@ test('legacy piece resource keys do not let failed session A block session B', a
  const sent:string[]=[];vi.stubGlobal('fetch',vi.fn(async (_url,init)=>{if(init?.method==='POST')sent.push(JSON.parse(String(init.body)).id);return Response.json([]);}));
  await syncEngine.processOutbox();expect(sent).toEqual(['b']);
 });
+async function orphanFixture() {
+ await db.syncOutbox.bulkPut([
+ {id:'parent',timestampUtc:'2026',operationType:'CREATE_PIECE',endpoint:'/api/pieces',method:'POST',payload:{id:'p'}},
+ {id:'child',timestampUtc:'2026',operationType:'LOG_SESSION',endpoint:'/api/pieces/p/sessions',method:'POST',payload:{id:'s'},dependencies:['piece:p']},
+ ]);
+ await db.pendingTakesOutbox.put({id:'take',pieceId:'p',sessionId:'s',scope:'PassageClip',targetSection:'',userSelfReflection:'',attachedPdfPages:'',includeVideoPostureAnalysis:false,mediaBlob:new Blob(['retained']),originalFileName:'test.wav',mimeType:'audio/wav',createdAtUtc:'2026',dependencies:['piece:p','session:s']});
+}
+test('discarding a parent parks descendants and retains exportable data',async()=>{
+ await orphanFixture();await syncEngine.discardWork('mutation','parent');
+ expect((await syncEngine.listWork()).failed).toHaveLength(2);
+ expect(await (await syncEngine.exportWork('take','take')).recording!.text()).toBe('retained');
+ expect(await db.syncOutbox.count()).toBe(0);
+});
+test.each([404,500,'timeout'])('dependency response %s only cascades on explicit 404',async(status)=>{
+ await orphanFixture();await db.syncOutbox.delete('parent');
+ vi.stubGlobal('fetch',vi.fn(async url=>{if(String(url).endsWith('/health'))return Response.json({});if(status==='timeout')throw new TypeError('timeout');return Response.json({}, {status:Number(status)});}));
+ await syncEngine.processOutbox();
+ expect((await syncEngine.listWork()).failed.length).toBe(status===404?2:0);
+});

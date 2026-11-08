@@ -173,6 +173,7 @@ export class SyncEngine {
         for (const entry of work) {
           if(this.signal?.aborted) break;
           const item=entry.item;
+          if(entry.kind==='mutation' ? !await this.db.syncOutbox.get(item.id) : (await this.db.pendingTakesOutbox.get(item.id))?.syncError) continue;
           if (attempted.has(item.id) || (item.nextAttemptAt ?? 0)>Date.now()) continue;
           const dependencies=item.dependencies ?? (entry.kind==='mutation' ? mutationDependencies(entry.item) : [`piece:${entry.item.pieceId}`,`session:${entry.item.sessionId}`]);
           if (!await this.dependenciesReady(dependencies, entry.kind==='take' ? entry.item.pieceId : undefined)) continue;
@@ -286,9 +287,27 @@ export class SyncEngine {
     // Caller requires explicit confirmation; this is never part of automatic recovery.
     await this.db.transaction('rw',[this.db.syncOutbox,this.db.deadLetterOutbox,this.db.pendingTakesOutbox,this.db.syncMeta],async()=>{
       if(kind==='take')await this.db.pendingTakesOutbox.delete(id);
-      else {await this.db.syncOutbox.delete(id);await this.db.deadLetterOutbox.delete(id);}
+      else {const parent=await this.db.syncOutbox.get(id) ?? await this.db.deadLetterOutbox.get(id);
+        const key=parent && providedKey(parent);if(key)await this.parkChildren(key);
+        await this.db.syncOutbox.delete(id);await this.db.deadLetterOutbox.delete(id);}
       await bumpRevision(this.db);
     });await this.notify();
+  }
+
+  private async parkChildren(key:string):Promise<void> {
+    await this.db.transaction('rw',[this.db.syncOutbox,this.db.deadLetterOutbox,this.db.pendingTakesOutbox,this.db.syncMeta],async()=>{
+      await this.db.syncMeta.delete(`ack:${key}`);
+      const reason='Needs review: the parent was discarded or the server confirmed it is missing. Your data is retained; export or discard it.';
+      for(const item of await this.db.syncOutbox.toArray()) {
+        if(!(item.dependencies ?? mutationDependencies(item)).includes(key))continue;
+        await this.deadLetter(item,reason,404);
+        const child=providedKey(item);if(child)await this.parkChildren(child);
+      }
+      for(const take of await this.db.pendingTakesOutbox.toArray()) {
+        if((take.dependencies ?? [`piece:${take.pieceId}`,`session:${take.sessionId}`]).includes(key))await this.db.pendingTakesOutbox.update(take.id,{syncError:reason,syncFailedAtUtc:new Date().toISOString()});
+      }
+      await bumpRevision(this.db);
+    });
   }
 
   private takeForm(take: PendingTake): FormData {
@@ -313,7 +332,7 @@ export class SyncEngine {
         if(kind==='session' && pieceId) found=(await api.getPiece(pieceId,this.signal)).sessions.some(session=>session.id===id);
         if(!found) return false;
         await this.db.syncMeta.put({key:`ack:${key}`,value:1});
-      } catch { return false; }
+      } catch(error) { if(getHttpStatus(error)===404){await this.parkChildren(key);return false;} return false; }
     }
     return true;
   }

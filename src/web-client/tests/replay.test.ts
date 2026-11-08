@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Dexie from 'dexie';
 import { db, CadenceLocalDb } from '../src/services/db';
-import { SyncEngine } from '../src/services/syncEngine';
+import { SyncEngine, syncEngine } from '../src/services/syncEngine';
 import { cadenceRepository } from '../src/services/cadenceRepository';
 const task = { id:'task',title:'Practice',category:'Piano' as const,priority:2,scheduledDate:null,isCompleted:false,completedAtUtc:null,updatedAtUtc:'2026-11-08',recurrence:'None' as const };
 export const take = { id:'take',pieceId:'piece',sessionId:'session',scope:'PassageClip' as const,targetSection:'bars',userSelfReflection:'',attachedPdfPages:'',includeVideoPostureAnalysis:false,mediaBlob:new Blob(['synthetic']),originalFileName:'take.wav',mimeType:'audio/wav',createdAtUtc:'2026-11-08' };
-beforeEach(async()=> { await db.open(); });
-afterEach(async()=> { vi.unstubAllGlobals(); await db.delete(); });
+beforeEach(async()=> {vi.spyOn(syncEngine,'triggerSync').mockImplementation(()=>{}); await db.open(); });
+afterEach(async()=> { vi.restoreAllMocks();vi.unstubAllGlobals(); await db.delete(); });
 test('completion sends desired state, never a toggle', async()=>{
  await db.tasks.put(task);
  await db.syncMeta.put({key:`ack:task:${task.id}`,value:1});
@@ -38,4 +38,12 @@ test('upgrade converts clear toggles and parks ambiguous history and old recordi
 });
 test('an empty legacy database creates no review entries on upgrade',async()=>{
  const name='empty-'+crypto.randomUUID();const old=new Dexie(name);old.version(3).stores({tasks:'id',pieces:'id',syncOutbox:'id,timestampUtc,operationType',pendingTakesOutbox:'id,pieceId,sessionId,createdAtUtc',deadLetterOutbox:'id,failedAtUtc'});await old.open();old.close();const upgraded=new CadenceLocalDb(name);await upgraded.open();expect(await upgraded.deadLetterOutbox.count()).toBe(0);expect(await upgraded.pendingTakesOutbox.count()).toBe(0);await upgraded.delete();
+});
+test('legacy delete wins over both queued and parked toggles',async()=>{
+ const name='delete-migration-'+crypto.randomUUID();const old=new Dexie(name);
+ old.version(3).stores({tasks:'id',pieces:'id',syncOutbox:'id,timestampUtc,operationType',pendingTakesOutbox:'id,pieceId,sessionId,createdAtUtc',deadLetterOutbox:'id,failedAtUtc'});
+ await old.open();const toggle={id:'toggle',timestampUtc:'2026',operationType:'TOGGLE_TASK',endpoint:'/api/tasks/t/toggle',method:'PATCH'};
+ await old.table('syncOutbox').bulkPut([toggle,{id:'delete',timestampUtc:'2027',operationType:'DELETE_TASK',endpoint:'/api/tasks/t',method:'DELETE'}]);
+ await old.table('deadLetterOutbox').put({...toggle,id:'parked',failedAtUtc:'2026',failureReason:'review',httpStatus:null});old.close();
+ const upgraded=new CadenceLocalDb(name);try{await upgraded.open();expect((await upgraded.syncOutbox.toArray()).map(i=>i.id)).toEqual(['delete']);expect(await upgraded.deadLetterOutbox.count()).toBe(0);}finally{await upgraded.delete();}
 });

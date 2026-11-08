@@ -2,7 +2,7 @@ import { afterEach,beforeEach,expect,test,vi } from 'vitest';
 import { db } from '../src/services/db';
 import { cadenceRepository as repo } from '../src/services/cadenceRepository';
 import { syncEngine } from '../src/services/syncEngine';
-beforeEach(async()=>{await db.open();});afterEach(async()=>{vi.unstubAllGlobals();await db.delete();});
+beforeEach(async()=>{vi.spyOn(syncEngine,'triggerSync').mockImplementation(()=>{});await db.open();});afterEach(async()=>{vi.restoreAllMocks();vi.unstubAllGlobals();await db.delete();});
 test.each([401,403,429])('%s retains queued work with a persisted retry deadline',async(status)=>{
  await repo.createPiece({id:'piece',title:'Piece',composer:'Composer',bucket:'MainChallenge'});let posts=0;
  vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{if(init?.method==='POST'){posts++;return Response.json({error:'retry later'},{status,headers:{'Retry-After':'120'}});}return Response.json([]);}));

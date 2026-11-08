@@ -2,8 +2,8 @@ import { afterEach,beforeEach,expect,test,vi } from 'vitest';
 import { db } from '../src/services/db';
 import { cadenceRepository as repo } from '../src/services/cadenceRepository';
 import { syncEngine } from '../src/services/syncEngine';
-beforeEach(async()=>{await db.open();vi.stubGlobal('fetch',vi.fn(async()=>{throw new TypeError('offline');}));});
-afterEach(async()=>{vi.unstubAllGlobals();await db.delete();});
+beforeEach(async()=>{vi.spyOn(syncEngine,'triggerSync').mockImplementation(()=>{});await db.open();vi.stubGlobal('fetch',vi.fn(async()=>{throw new TypeError('offline');}));});
+afterEach(async()=>{vi.restoreAllMocks();vi.unstubAllGlobals();await db.delete();});
 test('outbox failure rolls back the optimistic row',async()=>{
  const reject=()=>{throw new Error('injected storage failure');};db.syncOutbox.hook('creating',reject);
  try{await expect(repo.createTask({id:'atomic',title:'Practice',category:'Piano'})).rejects.toThrow('injected');expect(await db.tasks.get('atomic')).toBeUndefined();}finally{db.syncOutbox.hook('creating').unsubscribe(reject);}

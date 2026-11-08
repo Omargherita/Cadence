@@ -2,7 +2,7 @@ import { afterEach,beforeEach,expect,test,vi } from 'vitest';
 import { db } from '../src/services/db';
 import { cadenceRepository as repo } from '../src/services/cadenceRepository';
 import { syncEngine } from '../src/services/syncEngine';
-beforeEach(async()=>{await db.open();});afterEach(async()=>{vi.unstubAllGlobals();await db.delete();});
+beforeEach(async()=>{vi.spyOn(syncEngine,'triggerSync').mockImplementation(()=>{});await db.open();});afterEach(async()=>{vi.restoreAllMocks();vi.unstubAllGlobals();await db.delete();});
 async function queue(){await repo.createPiece({id:'piece',title:'Piece',composer:'Composer',bucket:'MainChallenge'});await repo.logPracticeSession('piece',{id:'session',startedAtUtc:'1999-01-01',durationMinutes:5});await repo.queueOfflineTake({id:'take',pieceId:'piece',sessionId:'session',scope:'PassageClip',targetSection:'',userSelfReflection:'',attachedPdfPages:'',includeVideoPostureAnalysis:false,mediaBlob:new Blob(['synthetic']),originalFileName:'take.wav',mimeType:'audio/wav',createdAtUtc:'1980-01-01'});}
 test('offline parents precede a backdated session and take',async()=>{
  await queue();const sent:string[]=[];

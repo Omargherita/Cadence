@@ -68,6 +68,8 @@ export class CadenceLocalDb extends Dexie {
     });
     this.version(4).stores({ syncOutbox: 'id,timestampUtc,operationType' }).upgrade(async tx => {
       const queued = await tx.table('syncOutbox').toArray() as OutboxItem[];
+      const deletes=new Set(queued.filter(i=>i.operationType==='DELETE_TASK').map(i=>i.endpoint.split('/')[3]));
+      await tx.table('deadLetterOutbox').filter((i:OutboxItem)=>(i.operationType==='TOGGLE_TASK' || i.endpoint.endsWith('/toggle')) && deletes.has(i.endpoint.split('/')[3])).delete();
       const groups = new Map<string, OutboxItem[]>();
       for (const item of queued.filter(i => i.operationType === 'TOGGLE_TASK' || i.endpoint.endsWith('/toggle'))) {
         const id = item.endpoint.split('/')[3];
@@ -79,6 +81,7 @@ export class CadenceLocalDb extends Dexie {
         const recurring = task?.recurrence && task.recurrence !== 'None';
         const clear = task && (!recurring || (items.length === 1 && task.isCompleted && items[0].payload?.nextOccurrenceId));
         await tx.table('syncOutbox').bulkDelete(items.map(i => i.id));
+        if(deletes.has(id))continue;
         const item = { ...items[items.length-1], originalOperations: items };
         if (clear) {
           await tx.table('syncOutbox').put({ ...item, operationType: 'SET_COMPLETED', endpoint: `/api/tasks/${id}/completion`, payload: { ...item.payload, isCompleted: task.isCompleted } });
@@ -113,6 +116,11 @@ export class CadenceLocalDb extends Dexie {
       }
       await tx.table('deadLetterOutbox').toCollection().modify((item:DeadLetterItem)=>{item.resourceKey ??= mutationResource(item);});
       await tx.table('syncMeta').put({key:'revision',value:sequence});
+    });
+    this.version(7).stores({}).upgrade(async tx=>{
+      const queued=await tx.table('syncOutbox').toArray() as OutboxItem[];
+      const deletes=new Set(queued.filter(i=>i.operationType==='DELETE_TASK').map(i=>i.endpoint.split('/')[3]));
+      for(const table of ['syncOutbox','deadLetterOutbox'])await tx.table(table).filter((i:OutboxItem)=>(i.operationType==='TOGGLE_TASK' || i.endpoint.endsWith('/toggle')) && deletes.has(i.endpoint.split('/')[3])).delete();
     });
 
   }

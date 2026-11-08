@@ -1,12 +1,12 @@
 import { afterEach,beforeEach,expect,test,vi } from 'vitest';
 import { db, CadenceLocalDb } from '../src/services/db';
-import { SyncEngine } from '../src/services/syncEngine';
+import { SyncEngine, syncEngine } from '../src/services/syncEngine';
 import { cadenceRepository as repo } from '../src/services/cadenceRepository';
 export class FakeLocks {
  held=false;
  async request(_name:string,options:{ifAvailable:boolean},callback:(lock:object|null)=>Promise<any>){expect(options.ifAvailable).toBe(true);if(this.held)return callback(null);this.held=true;try{return await callback({});}finally{this.held=false;}}
 }
-beforeEach(async()=>{await db.open();await repo.createPiece({id:'piece',title:'Piece',composer:'Composer',bucket:'MainChallenge'});});afterEach(async()=>{vi.unstubAllGlobals();await db.delete();});
+beforeEach(async()=>{vi.spyOn(syncEngine,'triggerSync').mockImplementation(()=>{});await db.open();await repo.createPiece({id:'piece',title:'Piece',composer:'Composer',bucket:'MainChallenge'});});afterEach(async()=>{vi.restoreAllMocks();vi.unstubAllGlobals();await db.delete();});
 test('two instances sharing IndexedDB send one POST; contender skips instead of waiting',async()=>{
  const locks=new FakeLocks();const other=new CadenceLocalDb(db.name);await other.open();
  let release!:()=>void;const gate=new Promise<void>(r=>release=r);let entered!:()=>void;const started=new Promise<void>(r=>entered=r);let posts=0;

@@ -20,6 +20,7 @@ export function App() {
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncMessage,setSyncMessage] = useState<string | null>(syncEngine.pauseReason);
   const wasOffline = useRef(false);
 
   // Life Organizer State
@@ -66,6 +67,7 @@ export function App() {
     const unsubscribe = syncEngine.subscribe((status: SyncEngineStatus) => {
       setPendingOutboxCount(status.pendingCount);
       setIsSyncing(status.isSyncing);
+      setSyncMessage(status.lastError);
     });
     return unsubscribe;
   }, []);
@@ -215,6 +217,7 @@ export function App() {
 
   return (
     <div className="cadence-app min-h-screen bg-[#0B0E14] text-[#F0F4F8] flex flex-col font-sans selection:bg-blue-600/30 selection:text-white">
+      {syncMessage && <p role="status" className="system-message">{syncMessage}</p>}
       {/* Top Application Header */}
       <Header
         horizon={horizon} onHorizon={setHorizon} pieces={pieces} selectedPieceId={selectedPieceId}

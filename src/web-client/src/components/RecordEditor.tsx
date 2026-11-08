@@ -19,9 +19,10 @@ export function RecordEditor({ endpoint, value, fields, onSaved, allowDelete = t
     if (deleted && !window.confirm('Delete this record and its associated records?')) return;
     setBusy(true); setError('');
     try {
+      await syncEngine.runOnlineEdit(async signal => {
       if (await syncEngine.hasProtectedWork()) throw new Error('Resolve queued and failed work before editing or deleting.');
       await syncEngine.invalidateReads();
-      const res = await fetch(endpoint, { method: deleted ? 'DELETE' : 'PUT',
+      const res = await fetch(endpoint, { method: deleted ? 'DELETE' : 'PUT', signal,
         headers: { 'Content-Type': 'application/json' }, body: deleted ? undefined : JSON.stringify(draft) });
       if (!res.ok) throw await buildApiError(res, 'Could not save changes');
       const taskEndpoint = endpoint.startsWith('/api/tasks/');
@@ -30,7 +31,7 @@ export function RecordEditor({ endpoint, value, fields, onSaved, allowDelete = t
       let refreshed: any;
       if (taskEndpoint && !deleted) refreshed = await res.json();
       else if (!taskEndpoint && !deletingPiece) {
-        const response = await fetch(`/api/pieces/${pieceId}`);
+        const response = await fetch(`/api/pieces/${pieceId}`,{signal});
         if (response.ok) refreshed = await response.json();
       }
       await db.transaction('rw', [db.tasks,db.pieces,db.syncOutbox,db.deadLetterOutbox,db.pendingTakesOutbox,db.syncMeta], async()=> {
@@ -42,6 +43,7 @@ export function RecordEditor({ endpoint, value, fields, onSaved, allowDelete = t
         } else if (deletingPiece) await db.pieces.delete(pieceId);
         else if (refreshed) await db.pieces.put(refreshed);
         await bumpRevision(db);
+      });
       });
       await onSaved(deleted); setOpen(false);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save changes'); }

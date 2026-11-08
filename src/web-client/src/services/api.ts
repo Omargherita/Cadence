@@ -41,15 +41,15 @@ export function isPermanentApiError(err: unknown): boolean {
 }
 
 export const api = {
-  async getHealth(): Promise<HealthStatus> {
-    const res = await fetch(`${BASE_URL}/health`);
+  async getHealth(signal?:AbortSignal): Promise<HealthStatus> {
+    const res = await fetch(`${BASE_URL}/health`,{signal});
     if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`);
     return res.json();
   },
 
-  async getTasks(date?: string): Promise<TaskItem[]> {
+  async getTasks(date?: string, signal?:AbortSignal): Promise<TaskItem[]> {
     const url = date ? `${BASE_URL}/tasks?date=${encodeURIComponent(date)}` : `${BASE_URL}/tasks`;
-    const res = await fetch(url);
+    const res = await fetch(url,{signal});
     if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.statusText}`);
     return res.json();
   },
@@ -84,14 +84,14 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to delete task: ${res.statusText}`);
   },
 
-  async getPieces(): Promise<Piece[]> {
-    const res = await fetch(`${BASE_URL}/pieces`);
+  async getPieces(signal?:AbortSignal): Promise<Piece[]> {
+    const res = await fetch(`${BASE_URL}/pieces`,{signal});
     if (!res.ok) throw new Error(`Failed to fetch pieces: ${res.statusText}`);
     return res.json();
   },
 
-  async getPiece(id: string): Promise<Piece> {
-    const res = await fetch(`${BASE_URL}/pieces/${id}`);
+  async getPiece(id: string, signal?:AbortSignal): Promise<Piece> {
+    const res = await fetch(`${BASE_URL}/pieces/${id}`,{signal});
     if (!res.ok) throw new Error(`Failed to fetch piece: ${res.statusText}`);
     return res.json();
   },
@@ -162,10 +162,10 @@ export const api = {
     return res.json();
   },
 
-  async uploadTake(pieceId: string, sessionId: string, formData: FormData): Promise<PracticeTake> {
+  async uploadTake(pieceId: string, sessionId: string, formData: FormData, signal?:AbortSignal): Promise<PracticeTake> {
     const res = await fetch(`${BASE_URL}/pieces/${pieceId}/sessions/${sessionId}/takes`, {
       method: 'POST',
-      body: formData,
+      body: formData, signal,
     });
     if (!res.ok) throw await buildApiError(res, 'Failed to analyze take');
     return res.json();

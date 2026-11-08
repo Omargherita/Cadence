@@ -346,3 +346,16 @@ uploads; unresolved or failed parents keep children pending without consuming
 retry attempts. Existing parents are verified against the host when their local
 acknowledgement is unknown. Legacy timestamps are used only to seed deterministic
 migration order; dependencies enforce parent order even for backdated sessions.
+
+Outgoing queue processing uses the single named Web Lock `cadence-outbox`, with
+`ifAvailable: true`. A competing tab skips the cycle and tries on the next tick;
+queue state is read only after ownership is acquired. A five-minute cycle deadline
+aborts outstanding fetches; failure/cancellation leaves unacknowledged work queued.
+The lock callback always settles through cleanup, releasing ownership. Online-only
+RecordEditor writes share this lock and still require all protected work resolved.
+
+There is no lease/expiry fallback. If Web Locks is unavailable, outgoing queue sync
+pauses, queued data stays intact, and the UI explains why. Serve the app over HTTPS
+or localhost: **Tailscale Serve HTTPS and localhost both work** in supported browsers.
+An ordinary HTTP LAN address may not provide the secure context Web Locks requires.
+No request sets or fakes an Origin header; browser-origin checks remain enabled.

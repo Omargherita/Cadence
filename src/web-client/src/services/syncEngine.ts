@@ -36,8 +36,48 @@ function classifyFailure(err: unknown): FailureKind {
   return 'retry';
 }
 
+export interface SyncLockManager {
+  request<T>(name:string, options:{ifAvailable:true}, callback:(lock:object|null)=>Promise<T>):Promise<T>;
+}
+export const OUTBOX_LOCK = 'cadence-outbox';
+export const LOCKS_UNAVAILABLE = "Sync is paused: Web Locks is unavailable. Tabs need HTTPS or localhost to coordinate; Tailscale Serve provides HTTPS.";
 export class SyncEngine {
-  constructor(private readonly db: CadenceLocalDb = defaultDb) {}
+  private readonly locks:SyncLockManager|null;
+  private readonly timeoutMs:number;
+  private signal?:AbortSignal;
+  constructor(private readonly db: CadenceLocalDb = defaultDb, options:{locks?:SyncLockManager|null;timeoutMs?:number}={}) {
+    this.locks=options.locks===undefined ? (typeof navigator!=='undefined' ? navigator.locks ?? null : null) : options.locks;
+    this.timeoutMs=options.timeoutMs ?? 300000;
+  }
+  public get pauseReason() { return this.locks ? null : LOCKS_UNAVAILABLE; }
+  public async runOnlineEdit(action:(signal:AbortSignal)=>Promise<void>):Promise<void> {
+    if(!this.locks) throw new Error(LOCKS_UNAVAILABLE);
+    await this.locks.request(OUTBOX_LOCK,{ifAvailable:true},async lock=>{
+      if(!lock) throw new Error('Another tab is syncing. Try again shortly.');
+      if(await this.hasProtectedWork()) throw new Error('Resolve queued and failed work before editing or deleting.');
+      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),this.timeoutMs);
+      try { await action(controller.signal); }
+      finally { clearTimeout(timer);controller.abort();await this.invalidateReads(); }
+    });
+  }
+  public async processOutbox(signal?:AbortSignal):Promise<{processed:number;remaining:number}> {
+    const skipped=async()=>({processed:0,remaining:await this.getPendingCount()});
+    if(this.isSyncing) return skipped();
+    this.isSyncing=true;
+    try {
+      if(!this.locks){this.lastError=LOCKS_UNAVAILABLE;return await skipped();}
+      return await this.locks.request(OUTBOX_LOCK,{ifAvailable:true},async lock=>{
+        if(!lock || signal?.aborted) return skipped();
+        const controller=new AbortController();const abort=()=>controller.abort();
+        signal?.addEventListener('abort',abort,{once:true});
+        const timer=setTimeout(abort,this.timeoutMs);this.signal=controller.signal;
+        // No queue snapshot exists before this point. Drain reads IndexedDB under ownership.
+        try { return await this.drainOutbox(); }
+        finally { clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.abort();this.signal=undefined; }
+        // Web Locks releases ownership when this callback settles, including thrown errors.
+      });
+    } finally { this.isSyncing=false;await this.notify(); }
+  }
   public async refreshStatus() { await this.notify(); }
   public async invalidateReads() { await this.db.transaction('rw', this.db.syncMeta, () => bumpRevision(this.db)); }
   public async hasProtectedWork() { return (await this.getPendingCount()) + (await this.getFailedCount()) > 0; }
@@ -62,7 +102,7 @@ export class SyncEngine {
       pendingCount,
       failedCount,
       lastSyncedAtUtc: this.lastSyncedAtUtc,
-      lastError: this.lastError,
+      lastError: this.pauseReason ?? this.lastError,
     };
     for (const listener of this.listeners) {
       listener(status);
@@ -91,22 +131,16 @@ export class SyncEngine {
   /**
    * Replays pending mutations in FIFO order against the backend.
    */
-  public async processOutbox(): Promise<{ processed: number; remaining: number }> {
-    if (this.isSyncing) {
-      return { processed: 0, remaining: await this.getPendingCount() };
-    }
-
+  private async drainOutbox(): Promise<{ processed: number; remaining: number }> {
     try {
-      this.isSyncing = true;
       this.lastError = null;
       await this.notify();
 
       // Check if backend is reachable before starting replay
       try {
-        await api.getHealth();
+        await api.getHealth(this.signal);
       } catch {
         // Backend not reachable, abort replay quietly
-        this.isSyncing = false;
         await this.notify();
         return { processed: 0, remaining: await this.getPendingCount() };
       }
@@ -115,12 +149,14 @@ export class SyncEngine {
       const attempted = new Set<string>();
       // Re-read after each acknowledgement so newly satisfied dependencies can run in this cycle.
       for (;;) {
+        if(this.signal?.aborted) break;
         const mutations = await this.db.syncOutbox.toArray();
         const takes = await this.db.pendingTakesOutbox.filter(t=>!t.syncError).toArray();
         const work = [...mutations.map(item=>({kind:'mutation' as const,item})),...takes.map(item=>({kind:'take' as const,item}))]
           .sort((a,b)=>(a.item.sequence ?? 0)-(b.item.sequence ?? 0)||a.item.id.localeCompare(b.item.id));
         let progressed = false;
         for (const entry of work) {
+          if(this.signal?.aborted) break;
           const item=entry.item;
           if (attempted.has(item.id)) continue;
           const dependencies=item.dependencies ?? (entry.kind==='mutation' ? mutationDependencies(entry.item) : [`piece:${entry.item.pieceId}`,`session:${entry.item.sessionId}`]);
@@ -141,7 +177,7 @@ export class SyncEngine {
                 await this.db.syncOutbox.delete(item.id);await bumpRevision(this.db);
               });
             } else {
-              await api.uploadTake(entry.item.pieceId,entry.item.sessionId,this.takeForm(entry.item));
+              await api.uploadTake(entry.item.pieceId,entry.item.sessionId,this.takeForm(entry.item),this.signal);
               await this.db.transaction('rw',this.db.pendingTakesOutbox,this.db.syncMeta,async()=>{await this.db.pendingTakesOutbox.delete(item.id);await bumpRevision(this.db);});
             }
             processedCount++;progressed=true;
@@ -174,7 +210,6 @@ export class SyncEngine {
         remaining: await this.getPendingCount(),
       };
     } finally {
-      this.isSyncing = false;
       await this.notify();
     }
   }
@@ -196,9 +231,9 @@ export class SyncEngine {
       const [kind,id]=key.split(':');
       try {
         let found=false;
-        if(kind==='task') found=(await api.getTasks()).some(task=>task.id===id);
-        if(kind==='piece') found=(await api.getPiece(id)).id===id;
-        if(kind==='session' && pieceId) found=(await api.getPiece(pieceId)).sessions.some(session=>session.id===id);
+        if(kind==='task') found=(await api.getTasks(undefined,this.signal)).some(task=>task.id===id);
+        if(kind==='piece') found=(await api.getPiece(id,this.signal)).id===id;
+        if(kind==='session' && pieceId) found=(await api.getPiece(pieceId,this.signal)).sessions.some(session=>session.id===id);
         if(!found) return false;
         await this.db.syncMeta.put({key:`ack:${key}`,value:1});
       } catch { return false; }
@@ -242,6 +277,7 @@ export class SyncEngine {
     const url = typeof window !== 'undefined' ? item.endpoint : `http://127.0.0.1:5006${item.endpoint}`;
     const res = await fetch(url, {
       method: item.method,
+      signal:this.signal,
       headers: item.payload ? { 'Content-Type': 'application/json' } : undefined,
       body: item.payload ? JSON.stringify(item.payload) : undefined,
     });
@@ -263,7 +299,7 @@ export class SyncEngine {
   public async syncDown(): Promise<void> {
     const revision = (await this.db.syncMeta.get('revision'))?.value ?? 0;
     try {
-      const [tasks,pieces] = await Promise.all([api.getTasks(),api.getPieces()]);
+      const [tasks,pieces] = await Promise.all([api.getTasks(undefined,this.signal),api.getPieces(this.signal)]);
       await this.db.transaction('rw', [this.db.tasks,this.db.pieces,this.db.syncOutbox,this.db.deadLetterOutbox,this.db.pendingTakesOutbox,this.db.syncMeta], async()=>{
         if (revision !== ((await this.db.syncMeta.get('revision'))?.value ?? 0) || await this.hasProtectedWork()) return;
         await this.db.tasks.clear();await this.db.tasks.bulkPut(tasks);

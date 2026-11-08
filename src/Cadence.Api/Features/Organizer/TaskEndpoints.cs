@@ -2,6 +2,8 @@ using Cadence.Api.Domain.Organizer;
 using Cadence.Api.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Data.Sqlite;
 
 namespace Cadence.Api.Features.Organizer;
 
@@ -34,7 +36,9 @@ public static class TaskEndpoints
                     t.Recurrence,
                     t.IsCompleted,
                     t.CompletedAtUtc,
-                    t.UpdatedAtUtc
+                    t.UpdatedAtUtc,
+                    t.SeriesId,
+                    t.OccurrenceDate
                 ))
                 .ToListAsync();
 
@@ -93,75 +97,81 @@ public static class TaskEndpoints
             return Results.Created($"/api/tasks/{task.Id}", response);
         });
 
-        group.MapPatch("/{id:guid}/toggle", async (Guid id, [FromBody] ToggleTaskRequest? request, CadenceDbContext db) =>
+        group.MapPatch("/{id:guid}/toggle", () => Results.BadRequest(new
         {
-            var task = await db.Tasks.FindAsync(id);
-            if (task is null)
+            code = "completion_state_required",
+            error = "Use PATCH /api/tasks/{id}/completion with an explicit isCompleted boolean."
+        }));
+
+        group.MapPatch("/{id:guid}/completion", async (Guid id, SetTaskCompletionRequest request, CadenceDbContext db, CancellationToken ct) =>
+        {
+            if (!request.IsCompleted.HasValue)
+                return Results.BadRequest(new { error = "isCompleted is required." });
+            // SQLite's immediate write transaction serializes read/create/update across connections.
+            // Acquire it before reading so concurrent completions observe the winner's successor marker.
+            // BeginTransaction uses the connection default, while subsequent commands use EF's timeout.
+            ((SqliteConnection)db.Database.GetDbConnection()).DefaultTimeout = 5;
+            db.Database.SetCommandTimeout(5);
+            IDbContextTransaction transaction;
+            try { transaction = await db.Database.BeginTransactionAsync(ct); }
+            catch (SqliteException ex) when (ex.SqliteErrorCode is 5 or 6)
             {
-                return Results.NotFound(new { error = $"Task with ID '{id}' was not found." });
+                return Results.Json(new { code = "database_busy", error = "Please retry completion shortly." }, statusCode: 503);
             }
+            await using var tx = transaction;
+            var task = await db.Tasks.FindAsync([id], ct);
+            if (task is null) return Results.NotFound();
 
-            task.IsCompleted = !task.IsCompleted;
-            task.CompletedAtUtc = task.IsCompleted ? DateTimeOffset.UtcNow : null;
-            task.UpdatedAtUtc = DateTimeOffset.UtcNow;
-
-            // When completing a recurring task, schedule the next occurrence
-            if (task.IsCompleted && task.Recurrence != RecurrencePattern.None)
+            TaskItem? next = null;
+            if (request.IsCompleted.Value && task.Recurrence != RecurrencePattern.None)
             {
-                // Prefer the client's local calendar date; fall back to the server's local (not UTC) date.
-                var baseDate = task.ScheduledDate ?? request?.ClientDate ?? CadenceTime.Today();
-                var nextDate = task.Recurrence switch
+                if (task.NextOccurrenceId.HasValue)
                 {
-                    RecurrencePattern.Daily => baseDate.AddDays(1),
-                    RecurrencePattern.Weekdays => GetNextWeekday(baseDate),
-                    RecurrencePattern.Weekly => baseDate.AddDays(7),
-                    _ => baseDate
-                };
-
-                // Reuse the id the client already gave its optimistic copy so both sides converge on one row.
-                var nextId = request?.NextOccurrenceId is { } clientId && clientId != Guid.Empty
-                    ? clientId
-                    : Guid.CreateVersion7();
-
-                var alreadyExists = await db.Tasks.AnyAsync(t =>
-                    t.Id == nextId ||
-                    (t.Title == task.Title &&
-                     t.ScheduledDate == nextDate &&
-                     !t.IsCompleted));
-
-                if (!alreadyExists)
+                    // Deleting the open successor stops generation. Neither replay nor reopen/complete resurrects it.
+                    next = await db.Tasks.FindAsync([task.NextOccurrenceId.Value], ct);
+                }
+                else
                 {
-                    var nextTask = new TaskItem
+                    task.SeriesId ??= task.Id;
+                    task.OccurrenceDate ??= task.ScheduledDate ?? request.ClientDate ?? CadenceTime.Today();
+                    var baseDate = task.OccurrenceDate.Value;
+                    var nextDate = task.Recurrence switch
                     {
-                        Id = nextId,
-                        Title = task.Title,
-                        Category = task.Category,
-                        Priority = task.Priority,
-                        Recurrence = task.Recurrence,
-                        ScheduledDate = nextDate,
-                        IsCompleted = false,
-                        CompletedAtUtc = null,
-                        UpdatedAtUtc = DateTimeOffset.UtcNow
+                        RecurrencePattern.Daily => baseDate.AddDays(1),
+                        RecurrencePattern.Weekdays => GetNextWeekday(baseDate),
+                        RecurrencePattern.Weekly => baseDate.AddDays(7),
+                        _ => baseDate
                     };
-                    db.Tasks.Add(nextTask);
+                    next = await db.Tasks.SingleOrDefaultAsync(t => t.SeriesId == task.SeriesId && t.OccurrenceDate == nextDate, ct);
+                    if (next is null)
+                    {
+                        var nextId = request.NextOccurrenceId is { } supplied && supplied != Guid.Empty ? supplied : Guid.CreateVersion7();
+                        if (await db.Tasks.AnyAsync(t => t.Id == nextId, ct)) return SyncReplay.Conflict();
+                        next = new TaskItem
+                        {
+                            Id = nextId, SeriesId = task.SeriesId, OccurrenceDate = nextDate,
+                            ScheduledDate = nextDate, Title = task.Title, Category = task.Category,
+                            Priority = task.Priority, Recurrence = task.Recurrence, UpdatedAtUtc = DateTimeOffset.UtcNow
+                        };
+                        // Accept a later optimistic create for exactly this generated occurrence.
+                        next.CreateFingerprint = SyncReplay.Task(new CreateTaskRequest(next.Id, next.Title, next.Category, next.Priority, next.ScheduledDate, next.Recurrence));
+                        db.Tasks.Add(next);
+                    }
+                    task.NextOccurrenceId = next.Id;
                 }
             }
-
-            await db.SaveChangesAsync();
-
-            var response = new TaskResponse(
-                task.Id,
-                task.Title,
-                task.Category,
-                task.Priority,
-                task.ScheduledDate,
-                task.Recurrence,
-                task.IsCompleted,
-                task.CompletedAtUtc,
-                task.UpdatedAtUtc
-            );
-
-            return Results.Ok(response);
+            if (task.IsCompleted != request.IsCompleted.Value)
+            {
+                task.IsCompleted = request.IsCompleted.Value;
+                // DateTimeOffsetToBinaryConverter retains 100-microsecond precision.
+                var now = DateTimeOffset.UtcNow;
+                now = new DateTimeOffset(now.Ticks - now.Ticks % 1000, TimeSpan.Zero);
+                task.CompletedAtUtc = task.IsCompleted ? now : null;
+                task.UpdatedAtUtc = now;
+            }
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return Results.Ok(new TaskCompletionResponse(ToResponse(task), next is null ? null : ToResponse(next)));
         });
 
         group.MapDelete("/{id:guid}", async (Guid id, CadenceDbContext db) =>
@@ -182,7 +192,7 @@ public static class TaskEndpoints
     }
 
     private static TaskResponse ToResponse(TaskItem t) => new(t.Id, t.Title, t.Category, t.Priority,
-        t.ScheduledDate, t.Recurrence, t.IsCompleted, t.CompletedAtUtc, t.UpdatedAtUtc);
+        t.ScheduledDate, t.Recurrence, t.IsCompleted, t.CompletedAtUtc, t.UpdatedAtUtc, t.SeriesId, t.OccurrenceDate);
 
     private static DateOnly GetNextWeekday(DateOnly current)
     {

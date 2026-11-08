@@ -21,6 +21,13 @@ public static class DomainEditingEndpoints
             if (task is null) return Results.NotFound();
             task.Title = request.Title.Trim(); task.Category = request.Category;
             task.Priority = request.Priority ?? 2; task.ScheduledDate = request.ScheduledDate;
+            if (task.Recurrence != request.Recurrence)
+            {
+                // A changed pattern starts a new forward chain; existing occurrences retain their identity.
+                task.SeriesId = request.Recurrence == Cadence.Api.Domain.Organizer.RecurrencePattern.None ? null : Guid.CreateVersion7();
+                task.OccurrenceDate = request.Recurrence == Cadence.Api.Domain.Organizer.RecurrencePattern.None ? null : request.ScheduledDate ?? CadenceTime.Today();
+                task.NextOccurrenceId = null;
+            }
             task.Recurrence = request.Recurrence; task.UpdatedAtUtc = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
             return Results.Ok(task);

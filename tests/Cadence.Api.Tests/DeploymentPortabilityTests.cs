@@ -395,9 +395,9 @@ print(json.dumps(payload))
             var patchForeign = await SendWithOriginAsync(
                 host.Client,
                 HttpMethod.Patch,
-                $"/api/tasks/{taskId}/toggle",
+                $"/api/tasks/{taskId}/completion",
                 origin: foreignOrigin,
-                jsonPayload: new { clientDate = "2026-11-07" });
+                jsonPayload: new { isCompleted = true, clientDate = "2026-11-07" });
             Assert.Equal(System.Net.HttpStatusCode.Forbidden, patchForeign.StatusCode);
 
             var deleteForeign = await SendWithOriginAsync(
@@ -419,9 +419,9 @@ print(json.dumps(payload))
             var allowListedRes = await SendWithOriginAsync(
                 host.Client,
                 HttpMethod.Patch,
-                $"/api/tasks/{taskId}/toggle",
+                $"/api/tasks/{taskId}/completion",
                 origin: allowListedOrigin,
-                jsonPayload: new { clientDate = "2026-11-07" });
+                jsonPayload: new { isCompleted = true, clientDate = "2026-11-07" });
             Assert.Equal(System.Net.HttpStatusCode.OK, allowListedRes.StatusCode);
 
             // 7. Multipart upload endpoints (/score and /takes): foreign Origin rejected (403), allow-listed Origin accepted
@@ -600,7 +600,7 @@ print(json.dumps(payload))
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<IMediaProcessingService, MediaProcessingService>();
         builder.Services.AddSingleton<IAudioDspAnalyzer>(new FastNoOpDspAnalyzer());
-        builder.Services.AddScoped<Cadence.Api.Features.PianoMentor.IPianoMentorService, Cadence.Api.Features.PianoMentor.PianoMentorService>();
+        builder.Services.AddSingleton<Cadence.Api.Features.PianoMentor.IPianoMentorService>(new SyncReplayTests.CountingMentor());
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());

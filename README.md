@@ -242,3 +242,76 @@ systemctl --user stop cadence.service
 systemctl --user start cadence.service
 ```
 `deploy/restore-db.sh` refuses to run while `cadence.service` is active, stages and verifies the candidate backup with `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before touching `db/`, archives the existing `app.db` and `-wal`/`-shm` sidecars into `backups/pre-restore/`, removes stale WAL/SHM sidecars, and atomically moves the verified database into place.
+
+### Synchronization contract (Batch 2a)
+
+Task, piece, and session creates accept a stable client `id`; take uploads accept
+that same stable identity in multipart field `id`. A new resource returns 201.
+An identical normalized request with the same ID returns 200 and the current
+resource, including its existing assessment for takes. A different original
+payload or parent returns 409 (`create_conflict`). Whitespace/defaults are
+normalized as on creation; session timestamps are compared as UTC instants.
+Omitting a session timestamp remains distinct from supplying one. Take identity
+includes a SHA-256 of the original bytes, the file extension, and all submitted
+assessment options. Multipart boundaries and filename basenames do not matter.
+The original fingerprint is saved with the resource and survives later edits and
+server restarts. Successful retries do not write files or rerun DSP/assessment.
+Same-ID requests are serialized in this single-server app with bounded in-memory
+locks; SQLite keys remain the persistent protection. Running multiple API server
+processes against the same storage is not supported. Deleted resource IDs are not
+retained as general create tombstones; clients must not replay creates after an
+explicit deletion.
+
+Completion is now `PATCH /api/tasks/{id}/completion` with:
+
+```json
+{ "isCompleted": true, "clientDate": "2026-11-08", "nextOccurrenceId": "optional-uuid" }
+```
+
+`isCompleted` is required; set it to false to reopen. The response is
+`{ "task": { ... }, "nextOccurrence": { ... } | null }`. Repeating the desired
+state preserves completion timestamps. Clients must adopt the canonical successor
+ID in the response if concurrent requests proposed different IDs. The old
+`PATCH /api/tasks/{id}/toggle` returns 400 (`completion_state_required`). **The
+existing frontend completion action and queued toggles require the Batch 2b
+contract update; Batch 2a does not update the client outbox.** Keep pending work
+until that update rather than attempting to flush old toggles.
+
+Recurring tasks expose `seriesId` and `occurrenceDate`. SQLite enforces uniqueness
+of `(SeriesId, OccurrenceDate)`; completion and successor generation share an
+immediate write transaction. Busy transaction acquisition retries within a bounded
+five-second SQLite deadline, then returns a recoverable 503. A new unscheduled
+series anchors its occurrence date on first completion using `clientDate`, falling
+back to the server's local calendar date. Once assigned, occurrence dates anchor
+the cadence even when one occurrence's displayed scheduled date changes.
+
+Editing affects one occurrence. Future occurrences inherit its title, category,
+priority, and recurrence when they are generated; already generated occurrences
+are unchanged. Changing the recurrence pattern starts a new forward chain (or
+ends it when set to None), without removing previously generated tasks. Deletion
+also affects only one occurrence. Normally only one open future occurrence exists
+because the successor is generated only upon completion. Reopening earlier tasks
+can leave multiple open occurrences. **Deleting the open occurrence stops that
+chain from generating until a new recurring occurrence is created manually.**
+Replaying completion, or reopening and completing its predecessor, cannot recreate
+the deleted successor: the predecessor retains its generated-successor marker.
+There is no whole-series edit/delete operation in this batch.
+
+Schema version 3 upgrades existing databases transactionally through
+`DatabaseSchema.InitializeAsync`. Historical series ancestry and original create
+requests were never stored. Every existing recurring row therefore becomes its
+own series; rows with identical titles/dates are preserved, not merged or deleted.
+Unscheduled legacy rows use the server's local date at migration. Old create
+fingerprints remain unknown: attempting to create with an existing legacy ID
+returns 409 rather than guessing whether the request matches. Ordinary editing,
+completion, and deletion remain available. Completing legacy independent rows may
+produce separate forward chains; migration cannot infer which rows once belonged
+together.
+
+Backend regression checks: `dotnet test` exercises real endpoints with disposable
+SQLite databases and synthetic media; DSP and mentor calls are mocked. Batch 2b
+will add frontend tests. The current Node v26.13.0 runs native TypeScript tests and
+loads the explicit `fake-indexeddb` devDependency, but native imports of the sync
+modules fail on extensionless imports such as `./db`. No frontend runner or
+packages were added in 2a; resolve that runner/import choice in 2b and make its lock
+manager injectable for cross-tab tests.

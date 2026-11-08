@@ -167,6 +167,37 @@ public static class PianoMentorEndpoints
             IPianoMentorService mentorService,
             CancellationToken ct) =>
         {
+            var form = await request.ReadFormAsync(ct);
+            var file = form.Files.GetFile("file") ?? (form.Files.Count > 0 ? form.Files[0] : null);
+            if (file == null || file.Length == 0)
+            {
+                return Results.BadRequest(new { error = "A media file (MP3 or MP4) is required." });
+            }
+
+            var takeId = Guid.TryParse(form["id"].ToString(), out var parsedId) && parsedId != Guid.Empty
+                ? parsedId
+                : Guid.CreateVersion7();
+
+            using var replayLock = await SyncReplay.LockAsync(takeId, ct);
+            // Fingerprint the submitted inputs, not mutable session defaults or multipart boundaries.
+            string mediaHash;
+            await using (var hashStream = file.OpenReadStream())
+                mediaHash = Convert.ToHexString(await global::System.Security.Cryptography.SHA256.HashDataAsync(hashStream, ct));
+            var fingerprint = SyncReplay.Fingerprint(new
+            {
+                pieceId, sessionId, mediaHash,
+                extension = Path.GetExtension(file.FileName).ToLowerInvariant(),
+                scope = Enum.TryParse<TakeScope>(form["scope"].ToString(), true, out var scopeInput) ? scopeInput : TakeScope.PassageClip,
+                sourceQuality = Enum.TryParse<MediaSourceQuality>(form["sourceQuality"].ToString(), true, out var qualityInput) ? qualityInput : MediaSourceQuality.PhoneMicCompressed,
+                targetSection = form["targetSection"].ToString(),
+                userSelfReflection = form["userSelfReflection"].ToString(),
+                attachedPdfPages = form["attachedPdfPages"].ToString(),
+                includeVideoPosture = bool.TryParse(form["includeVideoPostureAnalysis"].ToString(), out var postureInput) && postureInput
+            });
+            var existing = await db.PracticeTakes.AsNoTracking().SingleOrDefaultAsync(t => t.Id == takeId, ct);
+            if (existing is not null)
+                return existing.CreateFingerprint == fingerprint ? Results.Ok(existing) : SyncReplay.Conflict();
+
             var piece = await db.Pieces
                 .Include(p => p.Weaknesses)
                 .FirstOrDefaultAsync(p => p.Id == pieceId, ct);
@@ -182,17 +213,6 @@ public static class PianoMentorEndpoints
             {
                 return Results.NotFound(new { error = $"Session '{sessionId}' was not found for piece '{pieceId}'." });
             }
-
-            var form = await request.ReadFormAsync(ct);
-            var file = form.Files.GetFile("file") ?? (form.Files.Count > 0 ? form.Files[0] : null);
-            if (file == null || file.Length == 0)
-            {
-                return Results.BadRequest(new { error = "A media file (MP3 or MP4) is required." });
-            }
-
-            var takeId = Guid.TryParse(form["id"].ToString(), out var parsedId) && parsedId != Guid.Empty
-                ? parsedId
-                : Guid.CreateVersion7();
 
             var scopeStr = form["scope"].ToString();
             var scope = Enum.TryParse<TakeScope>(scopeStr, true, out var parsedScope) ? parsedScope : TakeScope.PassageClip;
@@ -242,6 +262,7 @@ public static class PianoMentorEndpoints
                 var take = new PracticeTake
                 {
                     Id = takeId,
+                    CreateFingerprint = fingerprint,
                     PracticeSessionId = sessionId,
                     TakeNumber = provisionalTakeNumber,
                     Scope = scope,

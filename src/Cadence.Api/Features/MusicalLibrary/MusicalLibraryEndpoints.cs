@@ -80,9 +80,16 @@ public static class MusicalLibraryEndpoints
                 ? request.Id.Value
                 : Guid.CreateVersion7();
 
+            using var replayLock = await SyncReplay.LockAsync(pieceId);
+            var fingerprint = SyncReplay.Piece(request);
+            var existing = await db.Pieces.FindAsync(pieceId);
+            if (existing is not null)
+                return existing.CreateFingerprint == fingerprint ? Results.Ok(existing) : SyncReplay.Conflict();
+
             var piece = new Piece
             {
                 Id = pieceId,
+                CreateFingerprint = fingerprint,
                 Title = request.Title.Trim(),
                 Composer = request.Composer.Trim(),
                 Bucket = request.Bucket,
@@ -175,9 +182,18 @@ public static class MusicalLibraryEndpoints
                 ? request.Id.Value
                 : Guid.CreateVersion7();
 
+            using var replayLock = await SyncReplay.LockAsync(sessionId);
+            var fingerprint = SyncReplay.Session(pieceId, request);
+            var existing = await db.PracticeSessions.FindAsync(sessionId);
+            if (existing is not null)
+                return existing.CreateFingerprint == fingerprint ? Results.Ok(new PracticeSessionResponse(
+                    existing.Id, existing.PieceId, existing.StartedAtUtc, existing.DurationMinutes,
+                    existing.TargetSection, existing.UserSelfReflection, existing.NextSessionGoal)) : SyncReplay.Conflict();
+
             var session = new PracticeSession
             {
                 Id = sessionId,
+                CreateFingerprint = fingerprint,
                 PieceId = pieceId,
                 StartedAtUtc = startedAt,
                 DurationMinutes = request.DurationMinutes,

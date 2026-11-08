@@ -63,9 +63,18 @@ public static class TaskEndpoints
                 ? request.Id.Value
                 : Guid.CreateVersion7();
 
+            using var replayLock = await SyncReplay.LockAsync(taskId);
+            var fingerprint = SyncReplay.Task(request);
+            var existing = await db.Tasks.FindAsync(taskId);
+            if (existing is not null)
+                return existing.CreateFingerprint == fingerprint ? Results.Ok(ToResponse(existing)) : SyncReplay.Conflict();
+
             var task = new TaskItem
             {
                 Id = taskId,
+                CreateFingerprint = fingerprint,
+                SeriesId = request.Recurrence == RecurrencePattern.None ? null : taskId,
+                OccurrenceDate = request.Recurrence == RecurrencePattern.None ? null : request.ScheduledDate,
                 Title = request.Title.Trim(),
                 Category = request.Category,
                 Priority = priority,
@@ -79,17 +88,7 @@ public static class TaskEndpoints
             db.Tasks.Add(task);
             await db.SaveChangesAsync();
 
-            var response = new TaskResponse(
-                task.Id,
-                task.Title,
-                task.Category,
-                task.Priority,
-                task.ScheduledDate,
-                task.Recurrence,
-                task.IsCompleted,
-                task.CompletedAtUtc,
-                task.UpdatedAtUtc
-            );
+            var response = ToResponse(task);
 
             return Results.Created($"/api/tasks/{task.Id}", response);
         });
@@ -181,6 +180,9 @@ public static class TaskEndpoints
 
         return group;
     }
+
+    private static TaskResponse ToResponse(TaskItem t) => new(t.Id, t.Title, t.Category, t.Priority,
+        t.ScheduledDate, t.Recurrence, t.IsCompleted, t.CompletedAtUtc, t.UpdatedAtUtc);
 
     private static DateOnly GetNextWeekday(DateOnly current)
     {

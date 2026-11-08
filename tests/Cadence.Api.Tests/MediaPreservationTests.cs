@@ -23,7 +23,7 @@ namespace Cadence.Api.Tests;
 
 public class MediaPreservationTests
 {
-    private sealed class DisposableTestHost : IAsyncDisposable
+    internal sealed class DisposableTestHost : IAsyncDisposable
     {
         public string TempRoot { get; }
         public CadenceStoragePaths StoragePaths { get; }
@@ -89,7 +89,7 @@ public class MediaPreservationTests
             }
             else
             {
-                builder.Services.AddScoped<IPianoMentorService, PianoMentorService>();
+                builder.Services.AddSingleton<IPianoMentorService>(new SyncReplayTests.CountingMentor());
             }
 
             builder.Services.ConfigureHttpJsonOptions(options =>
@@ -158,7 +158,7 @@ public class MediaPreservationTests
         }
     }
 
-    private static byte[] CreateSyntheticWavBytes(int sampleRate, double durationSeconds, double frequencyHz)
+    internal static byte[] CreateSyntheticWavBytes(int sampleRate, double durationSeconds, double frequencyHz)
     {
         int numSamples = (int)(sampleRate * durationSeconds);
         using var ms = new MemoryStream();
@@ -189,7 +189,7 @@ public class MediaPreservationTests
         return ms.ToArray();
     }
 
-    private static async Task<(Guid PieceId, Guid SessionId)> CreatePieceAndSessionAsync(HttpClient client)
+    internal static async Task<(Guid PieceId, Guid SessionId)> CreatePieceAndSessionAsync(HttpClient client)
     {
         var pieceId = Guid.CreateVersion7();
         var pieceRes = await client.PostAsJsonAsync("/api/pieces", new

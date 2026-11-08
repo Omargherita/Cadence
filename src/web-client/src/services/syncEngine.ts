@@ -30,7 +30,7 @@ function getHttpStatus(err: unknown): number | null {
 function classifyFailure(err: unknown): FailureKind {
   const status = getHttpStatus(err);
   if (status === null) return 'retry'; // fetch() rejected: offline / DNS / connection refused
-  if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) return 'retry';
+  if (status === 401 || status === 403 || status === 408 || status === 429 || status === 502 || status === 503 || status === 504) return 'retry';
   if (status >= 500) return 'server';
   if (status >= 400) return 'permanent';
   return 'retry';
@@ -158,7 +158,7 @@ export class SyncEngine {
         for (const entry of work) {
           if(this.signal?.aborted) break;
           const item=entry.item;
-          if (attempted.has(item.id)) continue;
+          if (attempted.has(item.id) || (item.nextAttemptAt ?? 0)>Date.now()) continue;
           const dependencies=item.dependencies ?? (entry.kind==='mutation' ? mutationDependencies(entry.item) : [`piece:${entry.item.pieceId}`,`session:${entry.item.sessionId}`]);
           if (!await this.dependenciesReady(dependencies, entry.kind==='take' ? entry.item.pieceId : undefined)) continue;
           if (entry.kind==='mutation') {
@@ -186,14 +186,17 @@ export class SyncEngine {
             this.lastError=message;
             const kind=classifyFailure(error);
             const attempts=(item.attempts ?? 0)+1;
-            if(kind==='retry') continue;
-            if(kind==='server' && attempts<MAX_SERVER_ERROR_ATTEMPTS) {
-              if(entry.kind==='mutation') await this.db.syncOutbox.update(item.id,{attempts});
-              else await this.db.pendingTakesOutbox.update(item.id,{attempts});
+            if(kind==='retry' || (kind==='server' && attempts<MAX_SERVER_ERROR_ATTEMPTS)) {
+              const retryCount=(item.retryCount ?? 0)+1;
+              const retryAfter=(error as {retryAfterMs?:number})?.retryAfterMs ?? 0;
+              const delay=Math.max(retryAfter,Math.min(300000,1000*2**Math.min(retryCount,8)));
+              const update={nextAttemptAt:Date.now()+delay,retryCount,lastError:message,lastHttpStatus:getHttpStatus(error),...(kind==='server'?{attempts}:{})};
+              if(entry.kind==='mutation') await this.db.syncOutbox.update(item.id,update);
+              else await this.db.pendingTakesOutbox.update(item.id,update);
               continue;
             }
-            if(entry.kind==='mutation') await this.deadLetter(entry.item,message,getHttpStatus(error));
-            else await this.db.pendingTakesOutbox.update(item.id,{syncError:message,syncFailedAtUtc:new Date().toISOString()});
+            if(entry.kind==='mutation') await this.deadLetter(entry.item,getHttpStatus(error)===409 ? `Conflict: ${message}. Compare server state before retrying; your local intent is retained.` : message,getHttpStatus(error));
+            else await this.db.pendingTakesOutbox.update(item.id,{syncError:getHttpStatus(error)===409 ? `Conflict: ${message}. Check the session before retrying.` : message,lastHttpStatus:getHttpStatus(error),syncFailedAtUtc:new Date().toISOString()});
           }
         }
         if(!progressed) break;
@@ -212,6 +215,65 @@ export class SyncEngine {
     } finally {
       await this.notify();
     }
+  }
+
+  public async listWork() {
+    const [queued,failed,takes,pieces,tasks]=await Promise.all([this.db.syncOutbox.toArray(),this.db.deadLetterOutbox.toArray(),this.db.pendingTakesOutbox.toArray(),this.db.pieces.toArray(),this.db.tasks.toArray()]);
+    const mutations=[...queued,...failed].map(item=>({
+      kind:'mutation' as const,id:item.id,title:tasks.find(t=>`task:${t.id}`===item.resourceKey)?.title ?? pieces.find(p=>`piece:${p.id}`===item.resourceKey)?.title ?? item.operationType,
+      reason:'failureReason' in item ? String(item.failureReason) : item.lastError ?? (item.dependencies?.length ? 'Waiting to sync after parent acknowledgement.' : 'Waiting to sync.'),
+      failed:'failureReason' in item, item,
+    }));
+    const recordings=takes.map(item=>{
+      const piece=pieces.find(p=>p.id===item.pieceId);const session=piece?.sessions.find(s=>s.id===item.sessionId);
+      return {kind:'take' as const,id:item.id,title:piece?.title ?? `Piece ${item.pieceId}`,reason:item.syncError ?? item.lastError ?? 'Waiting for parent acknowledgement and upload.',failed:Boolean(item.syncError),item,
+        pieceId:item.pieceId,sessionId:item.sessionId,sessionDate:session?.startedAtUtc ?? 'Unknown session date',recordingTime:item.createdAtUtc,fileName:item.originalFileName,fileSize:item.mediaBlob.size};
+    });
+    const all=[...mutations,...recordings];
+    return {pending:all.filter(i=>!i.failed),failed:all.filter(i=>i.failed)};
+  }
+
+  public async exportWork(kind:'take'|'mutation',id:string):Promise<{metadata:Record<string,any>;recording?:Blob;fileName?:string}> {
+    if(kind==='take') {
+      const take=await this.db.pendingTakesOutbox.get(id);if(!take)throw new Error('Recording not found');
+      const {mediaBlob,...metadata}=take;
+      const piece=await this.db.pieces.get(take.pieceId);
+      return {metadata:{...metadata,pieceName:piece?.title,sessionDate:piece?.sessions.find(s=>s.id===take.sessionId)?.startedAtUtc,fileSize:mediaBlob.size},recording:mediaBlob,fileName:take.originalFileName};
+    }
+    const item=await this.db.deadLetterOutbox.get(id) ?? await this.db.syncOutbox.get(id);
+    if(!item)throw new Error('Operation not found');return {metadata:item};
+  }
+
+  public async retryWork(kind:'take'|'mutation',id:string,desiredState?:boolean) {
+    await this.db.transaction('rw',[this.db.tasks,this.db.syncOutbox,this.db.deadLetterOutbox,this.db.pendingTakesOutbox,this.db.syncMeta],async()=>{
+      if(kind==='take') {
+        const take=await this.db.pendingTakesOutbox.get(id);if(!take)return;
+        await this.db.pendingTakesOutbox.update(id,{syncError:null,syncFailedAtUtc:null,legacyReview:false,attempts:0,retryCount:0,lastError:undefined,nextAttemptAt:take.lastHttpStatus===429 ? take.nextAttemptAt : 0});
+      } else {
+        const failed=await this.db.deadLetterOutbox.get(id);
+        const item=failed ?? await this.db.syncOutbox.get(id);if(!item)return;
+        if(item.operationType==='TOGGLE_TASK' || item.endpoint.endsWith('/toggle')) {
+          if(desiredState===undefined)throw new Error('Choose the completed state before retrying this legacy operation.');
+          item.operationType='SET_COMPLETED';item.endpoint=item.endpoint.replace(/\/toggle$/,'/completion');
+          item.payload={isCompleted:desiredState,clientDate:item.payload?.clientDate};
+          item.dependencies=[`task:${item.endpoint.split('/')[3]}`];
+          await this.db.tasks.update(item.endpoint.split('/')[3],{isCompleted:desiredState});
+        }
+        const {failureReason:_reason,failedAtUtc:_time,httpStatus:_status,...queued}=item as typeof item & {failureReason?:string;failedAtUtc?:string;httpStatus?:number|null};
+        await this.db.syncOutbox.put({...queued,attempts:0,retryCount:0,lastError:undefined,nextAttemptAt:item.lastHttpStatus===429 ? item.nextAttemptAt : 0});
+        await this.db.deadLetterOutbox.delete(id);
+      }
+      await bumpRevision(this.db);
+    });await this.notify();
+  }
+
+  public async discardWork(kind:'take'|'mutation',id:string) {
+    // Caller requires explicit confirmation; this is never part of automatic recovery.
+    await this.db.transaction('rw',[this.db.syncOutbox,this.db.deadLetterOutbox,this.db.pendingTakesOutbox,this.db.syncMeta],async()=>{
+      if(kind==='take')await this.db.pendingTakesOutbox.delete(id);
+      else {await this.db.syncOutbox.delete(id);await this.db.deadLetterOutbox.delete(id);}
+      await bumpRevision(this.db);
+    });await this.notify();
   }
 
   private takeForm(take: PendingTake): FormData {
@@ -254,20 +316,38 @@ export class SyncEngine {
   }
 
   public async applyCompletion(id: string, proposedId: string | undefined, response: TaskCompletionResponse) {
-    await this.db.transaction('rw', this.db.tasks, this.db.syncOutbox, this.db.syncMeta, async () => {
-      const next = response.nextOccurrence;
-      if (proposedId && proposedId !== next?.id) {
-        const dependent = await this.db.syncOutbox.filter(i => i.endpoint.includes(`/${proposedId}/`) || i.endpoint.endsWith(`/${proposedId}`)).toArray();
-        if (next) for (const item of dependent) await this.db.syncOutbox.update(item.id, { endpoint: item.endpoint.replace(proposedId, next.id), resourceKey:`task:${next.id}`, dependencies:(item.dependencies ?? []).map(key=>key===`task:${proposedId}` ? `task:${next.id}` : key) });
-        if (!dependent.length || next) await this.db.tasks.delete(proposedId);
+    await this.db.transaction('rw', [this.db.tasks,this.db.syncOutbox,this.db.deadLetterOutbox,this.db.syncMeta], async () => {
+      const next=response.nextOccurrence;
+      const localParent=await this.db.tasks.get(id);
+      let nextHasLocalIntent=false;
+      // Reopen responses have no successor body; they do not mean the successor was deleted.
+      if(response.task.isCompleted && proposedId && proposedId!==next?.id) {
+        const localNext=await this.db.tasks.get(proposedId);
+        const queued=await this.db.syncOutbox.toArray();const failed=await this.db.deadLetterOutbox.toArray();
+        const dependents=[...queued,...failed].filter(i=>i.endpoint.includes(`/${proposedId}/`) || i.endpoint.endsWith(`/${proposedId}`));
+        for(const item of dependents) {
+          if(next) {
+            const table=failed.some(f=>f.id===item.id)?this.db.deadLetterOutbox:this.db.syncOutbox;
+            await table.update(item.id,{endpoint:item.endpoint.replace(proposedId,next.id),resourceKey:`task:${next.id}`,dependencies:(item.dependencies ?? []).map(key=>key===`task:${proposedId}`?`task:${next.id}`:key)});
+          } else {
+            await this.db.deadLetterOutbox.put({...item,failedAtUtc:new Date().toISOString(),httpStatus:409,failureReason:'The server successor was deleted. This local occurrence and its intended changes are retained for review.'});
+            await this.db.syncOutbox.delete(item.id);
+          }
+        }
+        if(next && localNext && dependents.length) {
+          await this.db.tasks.put({...localNext,id:next.id,seriesId:next.seriesId,occurrenceDate:next.occurrenceDate});
+          nextHasLocalIntent=true;
+        }
+        if(next || !dependents.length)await this.db.tasks.delete(proposedId);
       }
-      const queued = await this.db.syncOutbox.toArray();
-      // Keep the latest local desired state when an older completion reply arrives.
-      const taskOps = queued.filter(i => i.endpoint === `/api/tasks/${id}/completion` || (i.method === 'DELETE' && i.endpoint === `/api/tasks/${id}`));
-      if (taskOps.length <= 1) await this.db.tasks.put({ ...response.task, id, nextOccurrenceId: next?.id ?? null });
-      if (next && !queued.some(i => i.endpoint.includes(`/${next.id}`))) await this.db.tasks.put(next);
+      const queued=[...await this.db.syncOutbox.toArray(),...await this.db.deadLetterOutbox.toArray()];
+      const taskOps=queued.filter(i=>i.endpoint===`/api/tasks/${id}/completion` || (i.method==='DELETE' && i.endpoint===`/api/tasks/${id}`));
+      const marker=response.task.isCompleted ? next?.id ?? null : localParent?.nextOccurrenceId;
+      if(taskOps.length<=1)await this.db.tasks.put({...response.task,id,nextOccurrenceId:marker});
+      else if(localParent)await this.db.tasks.update(id,{nextOccurrenceId:marker});
+      if(next && !nextHasLocalIntent && !queued.some(i=>i.endpoint.includes(`/${next.id}`)))await this.db.tasks.put(next);
       await this.db.syncMeta.put({key:`ack:task:${id}`,value:1});
-      if(next) await this.db.syncMeta.put({key:`ack:task:${next.id}`,value:1});
+      if(next)await this.db.syncMeta.put({key:`ack:task:${next.id}`,value:1});
       await bumpRevision(this.db);
     });
   }

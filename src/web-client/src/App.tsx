@@ -1,3 +1,6 @@
+import { liveQuery } from 'dexie';
+import { db } from './services/db';
+import { SyncWorkPanel } from './components/SyncWorkPanel';
 import { useEffect, useRef, useState } from 'react';
 import { Header, Horizon } from './components/Header';
 import { OrganizerView } from './features/organizer/OrganizerView';
@@ -21,6 +24,8 @@ export function App() {
   const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncMessage,setSyncMessage] = useState<string | null>(syncEngine.pauseReason);
+  const [failedOutboxCount,setFailedOutboxCount] = useState(0);
+  const [showSyncWork,setShowSyncWork] = useState(false);
   const wasOffline = useRef(false);
 
   // Life Organizer State
@@ -66,10 +71,13 @@ export function App() {
   useEffect(() => {
     const unsubscribe = syncEngine.subscribe((status: SyncEngineStatus) => {
       setPendingOutboxCount(status.pendingCount);
+      setFailedOutboxCount(status.failedCount);
       setIsSyncing(status.isSyncing);
       setSyncMessage(status.lastError);
     });
-    return unsubscribe;
+    const changed=liveQuery(()=>Promise.all([db.syncOutbox.toArray(),db.deadLetterOutbox.toArray(),db.pendingTakesOutbox.toArray()])).subscribe(()=>{void syncEngine.refreshStatus();});
+    const open=()=>setShowSyncWork(true);window.addEventListener('cadence-sync-work',open);
+    return ()=>{unsubscribe();changed.unsubscribe();window.removeEventListener('cadence-sync-work',open);};
   }, []);
 
   // 3. Health & Auto-Replay Loop
@@ -217,7 +225,11 @@ export function App() {
 
   return (
     <div className="cadence-app min-h-screen bg-[#0B0E14] text-[#F0F4F8] flex flex-col font-sans selection:bg-blue-600/30 selection:text-white">
-      {syncMessage && <p role="status" className="system-message">{syncMessage}</p>}
+      {showSyncWork && <SyncWorkPanel onClose={()=>setShowSyncWork(false)} onOpenSession={(pieceId,sessionId)=>{
+        sessionStorage.setItem('cadence-review-session',JSON.stringify({pieceId,sessionId}));
+        setActiveView('library');setSelectedPieceId(pieceId);
+        window.dispatchEvent(new Event('cadence-review-session'));
+      }} />}
       {/* Top Application Header */}
       <Header
         horizon={horizon} onHorizon={setHorizon} pieces={pieces} selectedPieceId={selectedPieceId}
@@ -228,6 +240,7 @@ export function App() {
           setActiveView(v);
           if (v === 'library') setSelectedPieceId(null);
         }}
+        failedOutboxCount={failedOutboxCount} onReviewSync={()=>setShowSyncWork(true)}
         isOnline={isOnline}
         pendingOutboxCount={pendingOutboxCount}
         isSyncing={isSyncing}
@@ -236,6 +249,7 @@ export function App() {
 
       {/* Main Content Workspace */}
       <main className="app-canvas">
+        {syncMessage && <p role="status" className="system-message">{syncMessage}</p>}
         {activeView === 'organizer' ? (
           <OrganizerView horizon={horizon}
             tasks={tasks}

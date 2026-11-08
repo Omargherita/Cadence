@@ -20,6 +20,10 @@ export interface OutboxItem {
   attempts?: number;
   resourceKey?: string;
   sequence?: number;
+  nextAttemptAt?: number;
+  retryCount?: number;
+  lastError?: string;
+  lastHttpStatus?: number | null;
   dependencies?: string[];
   originalOperations?: Pick<OutboxItem, 'id' | 'timestampUtc' | 'operationType' | 'endpoint' | 'method' | 'payload'>[];
 }

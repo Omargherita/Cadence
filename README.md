@@ -272,10 +272,8 @@ Completion is now `PATCH /api/tasks/{id}/completion` with:
 `{ "task": { ... }, "nextOccurrence": { ... } | null }`. Repeating the desired
 state preserves completion timestamps. Clients must adopt the canonical successor
 ID in the response if concurrent requests proposed different IDs. The old
-`PATCH /api/tasks/{id}/toggle` returns 400 (`completion_state_required`). **The
-existing frontend completion action and queued toggles require the Batch 2b
-contract update; Batch 2a does not update the client outbox.** Keep pending work
-until that update rather than attempting to flush old toggles.
+`PATCH /api/tasks/{id}/toggle` returns 400 (`completion_state_required`). **The Batch 2b client uses this contract and migrates or visibly parks old queued
+toggles before sending.** See the client migration notes below.
 
 Recurring tasks expose `seriesId` and `occurrenceDate`. SQLite enforces uniqueness
 of `(SeriesId, OccurrenceDate)`; completion and successor generation share an
@@ -309,12 +307,9 @@ produce separate forward chains; migration cannot infer which rows once belonged
 together.
 
 Backend regression checks: `dotnet test` exercises real endpoints with disposable
-SQLite databases and synthetic media; DSP and mentor calls are mocked. Batch 2b
-will add frontend tests. The current Node v26.13.0 runs native TypeScript tests and
-loads the explicit `fake-indexeddb` devDependency, but native imports of the sync
-modules fail on extensionless imports such as `./db`. No frontend runner or
-packages were added in 2a; resolve that runner/import choice in 2b and make its lock
-manager injectable for cross-tab tests.
+SQLite databases and synthetic media; DSP and mentor calls are mocked. Frontend tests use Vitest and the explicit `fake-indexeddb` devDependency. Native
+Node TypeScript execution could not resolve extensionless project imports such as
+`./db`, which is why 2b uses Vitest. The Web Locks adapter is injectable in tests.
 
 ### Client synchronization upgrade (Batch 2b)
 
@@ -331,7 +326,7 @@ retried: an earlier upload may have succeeded under an unknown server-generated
 ID. Their blobs and metadata remain in this browser. Explicit retry uses the now
 stable local ID; check the session first to avoid duplicates. New recordings get
 an ID before their first send and flow normally. Empty legacy queues create no
-review entries. Recovery controls are described below as they become available.
+review entries. Recovery controls are described below.
 
 Local task/piece/session changes and their queue entries now commit in one Dexie
 transaction. Downloads use a local revision guard and preserve the cache while
@@ -359,3 +354,35 @@ pauses, queued data stays intact, and the UI explains why. Serve the app over HT
 or localhost: **Tailscale Serve HTTPS and localhost both work** in supported browsers.
 An ordinary HTTP LAN address may not provide the secure context Web Locks requires.
 No request sets or fakes an Origin header; browser-origin checks remain enabled.
+
+**Review and recovery:** use “Inspect sync work” in the sidebar or beside a saved
+recording. Pending/waiting work is separate from “Needs review / parked”. Inspect
+shows the saved request, including original legacy toggle payloads. A legacy toggle
+requires choosing Open or Completed before an explicit retry; ambiguous successors
+are never guessed. A 409 is a visible conflict, not silently discarded or retried
+under a fresh ID. Check the server/session before retrying or explicitly resolving
+it. Pre-2a server rows may return 409 because their original create payload is unknown.
+
+Parked recordings show piece name (or ID if unavailable), session date and ID,
+recording timestamp, filename, and byte size. “Open session” opens that session for
+comparison with the host's takes. “Export recording + metadata” downloads the
+original blob plus JSON metadata locally; allow both downloads if your browser
+prompts. “Retry upload” is explicit and preserves the stored ID/options. “Mark
+resolved / discard” requires confirmation that the recording will be deleted from
+this browser; it does not delete a server take. If there are no pre-upgrade queued
+recordings, the migration creates no visible parked items.
+
+401/403 remain pending with an authorization/configuration error and backoff; check
+login or the server's allowed-origin configuration rather than discarding data.
+429 honors Retry-After seconds or an HTTP date, including after manual retry.
+Network failures and temporary host outages also back off. Repeated other 5xx
+responses are parked after five failures. Failed operations and parked blobs keep
+optimistic caches protected until explicitly resolved. A discarded operation no
+longer protects its optimistic row; a subsequent safe refresh can replace it with
+server state. Children of unresolved parents remain pending. Retry/export/discard
+controls do not introduce offline RecordEditor edits or deletes.
+
+No client request fabricates Origin. Same-origin JSON PATCH and browser-generated
+multipart headers use the existing origin guard. Frontend tests mock requests and
+Web Locks; backend origin-guard integration tests cover the real routes. Browser
+PWA lifecycle and multi-download prompts still need a manual check in your browsers.

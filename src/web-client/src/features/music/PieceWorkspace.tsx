@@ -73,9 +73,13 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
   // Weaknesses
   const [weaknesses, setWeaknesses] = useState<PieceWeakness[]>(piece.weaknesses || []);
 
+  function reviewSession() {
+    try {const saved=JSON.parse(sessionStorage.getItem('cadence-review-session') ?? 'null');return saved?.pieceId===piece.id ? saved.sessionId as string : null;} catch {return null;}
+  }
+  useEffect(()=>{const select=()=>{const id=reviewSession();if(id)setSelectedSessionId(id);};window.addEventListener('cadence-review-session',select);return()=>window.removeEventListener('cadence-review-session',select);},[piece.id]);
   // Selected Session for Takes
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    piece.sessions.length > 0 ? piece.sessions[0].id : null
+    reviewSession() ?? (piece.sessions.length > 0 ? piece.sessions[0].id : null)
   );
   const [sessionTakes, setSessionTakes] = useState<PracticeTake[]>([]);
   const [pendingTakes, setPendingTakes] = useState<PendingTake[]>([]);
@@ -103,7 +107,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
   // Keep selectedSessionId valid when sessions list updates
   useEffect(() => {
     if (piece.sessions.length > 0) {
-      if (!selectedSessionId || !piece.sessions.some((s) => s.id === selectedSessionId)) {
+      if (!selectedSessionId || (!piece.sessions.some((s) => s.id === selectedSessionId) && reviewSession() !== selectedSessionId)) {
         setSelectedSessionId(piece.sessions[0].id);
       }
     } else {
@@ -212,6 +216,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
   };
 
   const handleDeletePendingTake = async (id: string) => {
+    if (!window.confirm('This recording will be deleted from this browser. Export it first if needed. Discard?')) return;
     await cadenceRepository.deletePendingTake(id);
     await loadPendingTakes();
   };
@@ -582,10 +587,10 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                     <div className="flex items-center justify-between px-1">
                       <h4 className="text-xs font-mono font-semibold text-amber-400   flex items-center gap-1.5">
                         <Upload className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Offline Queued Takes ({pendingTakes.length})</span>
+                        <span>Saved Recordings ({pendingTakes.length})</span>
                       </h4>
                       <span className="text-xs font-mono text-slate-400">
-                        Awaiting Host Connection
+                        Pending or needs review
                       </span>
                     </div>
 
@@ -598,7 +603,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-amber-950/60 text-amber-300 border border-amber-800/70 flex items-center gap-1.5 ">
                               <Radio className="w-3.5 h-3.5 text-amber-400" />
-                              <span>Queued for Maestro Analysis (Waiting for Host)</span>
+                              <span>{take.syncError ? 'Needs review / parked' : 'Pending analysis'}</span>
                             </span>
                             <span className="px-2 py-0.5 rounded text-xs font-mono bg-violet-950/40 text-violet-300 border border-violet-800/50">
                               {take.scope}
@@ -647,18 +652,18 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
                           </p>
                         )}
 
+                        <button type="button" className="text-sm text-blue-300" onClick={()=>window.dispatchEvent(new Event('cadence-sync-work'))}>Inspect, retry or export</button>
                         {take.syncError ? (
                           <div className="flex items-start gap-1.5 p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-xs font-mono text-amber-300">
                             <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                             <span>
-                              The host rejected this take and it will not be retried: {take.syncError}. Discard it
-                              and upload a corrected file.
+                              {take.syncError} It will not retry automatically.
                             </span>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400">
                             <Upload className="w-3.5 h-3.5 text-blue-400" />
-                            <span>Stored safely in Dexie. Will upload and trigger Maestro assessment when backend is reached.</span>
+                            <span>Saved in this browser. Waiting for its parents and the next sync attempt.</span>
                           </div>
                         )}
                       </div>

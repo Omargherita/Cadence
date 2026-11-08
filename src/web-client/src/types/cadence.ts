@@ -196,6 +196,10 @@ export interface PendingTake {
   syncError?: string | null;
   syncFailedAtUtc?: string | null;
   legacyReview?: boolean;
+  nextAttemptAt?: number;
+  retryCount?: number;
+  lastError?: string;
+  lastHttpStatus?: number | null;
   sequence?: number;
   dependencies?: string[];
 }

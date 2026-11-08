@@ -6,6 +6,7 @@ import { DAY_ARCHETYPES, DayArchetype, Piece } from '../types/cadence';
 export type Horizon = 'today' | 'weekly' | 'unscheduled' | 'completed' | 'all';
 interface HeaderProps {
   activeView: 'organizer' | 'library'; onSelectView: (view: 'organizer' | 'library') => void;
+  failedOutboxCount: number; onReviewSync: () => void;
   isOnline: boolean; pendingOutboxCount: number; isSyncing: boolean; onSyncNow: () => Promise<void>;
   horizon: Horizon; onHorizon: (horizon: Horizon) => void; pieces: Piece[]; onPiece: (id: string) => void;
   selectedPieceId: string | null; archetype: DayArchetype; onArchetype: (value: DayArchetype) => void;
@@ -36,6 +37,7 @@ export function Header(p: HeaderProps) {
         <p className="secondary">{DAY_ARCHETYPES.find(a => a.type === p.archetype)?.pianoTarget}</p>
         <p className="secondary">{practiced}m practiced today</p><progress className="practice-progress" aria-label="Daily practice target" value={practiced} max={target}/><div className="system-row"><span className={p.isOnline ? 'secondary' : 'attention'}>{p.isOnline ? '● Connected' : '○ Offline'}</span><button disabled={busy || !p.isOnline} onClick={backup} title="Create database backup"><Database size={14}/>{busy ? 'Saving…' : 'Backup'}</button></div>
         {p.pendingOutboxCount > 0 && <button disabled={!p.isOnline || p.isSyncing} onClick={p.onSyncNow}><RefreshCw size={14}/>{p.isSyncing ? 'Syncing…' : `${p.pendingOutboxCount} queued · Sync now`}</button>}
+        {(p.pendingOutboxCount > 0 || p.failedOutboxCount > 0) && <button onClick={p.onReviewSync}>{p.failedOutboxCount} need review · {p.pendingOutboxCount} pending · Inspect sync work</button>}
         <p role="status" className="system-message">{message}</p>
       </footer>
     </aside>

@@ -15,7 +15,7 @@ test('two instances sharing IndexedDB send one POST; contender skips instead of 
 });
 test('request failure releases lock and the second tab picks up retained work',async()=>{
  const locks=new FakeLocks();let posts=0;vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{if(init?.method==='POST'){if(++posts===1)throw new TypeError('offline');return Response.json({id:'piece'});}return Response.json([]);}));
- await new SyncEngine(db,{locks}).processOutbox();expect(locks.held).toBe(false);expect(await db.syncOutbox.count()).toBe(1);await new SyncEngine(db,{locks}).processOutbox();expect(posts).toBe(2);expect(await db.syncOutbox.count()).toBe(0);
+ await new SyncEngine(db,{locks}).processOutbox();expect(locks.held).toBe(false);expect(await db.syncOutbox.count()).toBe(1);await db.syncOutbox.toCollection().modify({nextAttemptAt:0});await new SyncEngine(db,{locks}).processOutbox();expect(posts).toBe(2);expect(await db.syncOutbox.count()).toBe(0);
 });
 test('missing Web Locks pauses outgoing work with a reason',async()=>{
  const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);const engine=new SyncEngine(db,{locks:null});let message='';engine.subscribe(s=>message=s.lastError ?? '');await engine.processOutbox();expect(fetcher).not.toHaveBeenCalled();expect(await db.syncOutbox.count()).toBe(1);expect(message).toMatch(/HTTPS or localhost/);

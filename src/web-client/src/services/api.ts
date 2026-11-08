@@ -19,7 +19,7 @@ const BASE_URL = typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:5006
 export class ApiError extends Error {
   readonly status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, readonly retryAfterMs = 0) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -28,7 +28,9 @@ export class ApiError extends Error {
 
 export async function buildApiError(res: Response, fallback: string): Promise<ApiError> {
   const body = await res.json().catch(() => ({}));
-  return new ApiError(body?.error || `${fallback}: ${res.statusText || res.status}`, res.status);
+  const value=res.headers.get('Retry-After');
+  const retryAfterMs=value ? (/^\d+$/.test(value.trim()) ? Number(value)*1000 : Math.max(0,Date.parse(value)-Date.now())) : 0;
+  return new ApiError(body?.error || `${fallback}: ${res.statusText || res.status}`, res.status, Number.isFinite(retryAfterMs) ? retryAfterMs : 0);
 }
 
 /**
@@ -37,7 +39,7 @@ export async function buildApiError(res: Response, fallback: string): Promise<Ap
  */
 export function isPermanentApiError(err: unknown): boolean {
   const status = (err as { status?: unknown } | null)?.status;
-  return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429;
+  return typeof status === 'number' && status >= 400 && status < 500 && ![401,403,408,409,429].includes(status);
 }
 
 export const api = {

@@ -21,7 +21,7 @@ test('retry carries the original take ID',async()=>{
  await db.syncMeta.bulkPut([{key:"ack:piece:piece",value:1},{key:"ack:session:session",value:1}]);
  const ids:string[]=[];
  vi.stubGlobal('fetch',vi.fn(async(url,init)=>{ if(String(url).endsWith('/takes')){ids.push(init.body.get('id'));throw new TypeError('lost reply');}return Response.json({}); }));
- const engine=new SyncEngine();await engine.processOutbox();await engine.processOutbox();expect(ids).toEqual(['take','take']);
+ const engine=new SyncEngine();await engine.processOutbox();await db.pendingTakesOutbox.update(take.id,{nextAttemptAt:0});await engine.processOutbox();expect(ids).toEqual(['take','take']);
 });
 test('upgrade converts clear toggles and parks ambiguous history and old recordings',async()=>{
  const name='migration-'+crypto.randomUUID();const old=new Dexie(name);
@@ -35,4 +35,7 @@ test('upgrade converts clear toggles and parks ambiguous history and old recordi
  expect((await upgraded.pendingTakesOutbox.get('take'))?.legacyReview).toBe(true);
  await upgraded.pendingTakesOutbox.add({...take,id:'new'});expect((await upgraded.pendingTakesOutbox.get('new'))?.syncError).toBeUndefined();
  await upgraded.delete();
+});
+test('an empty legacy database creates no review entries on upgrade',async()=>{
+ const name='empty-'+crypto.randomUUID();const old=new Dexie(name);old.version(3).stores({tasks:'id',pieces:'id',syncOutbox:'id,timestampUtc,operationType',pendingTakesOutbox:'id,pieceId,sessionId,createdAtUtc',deadLetterOutbox:'id,failedAtUtc'});await old.open();old.close();const upgraded=new CadenceLocalDb(name);await upgraded.open();expect(await upgraded.deadLetterOutbox.count()).toBe(0);expect(await upgraded.pendingTakesOutbox.count()).toBe(0);await upgraded.delete();
 });

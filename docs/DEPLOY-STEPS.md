@@ -1,24 +1,54 @@
 # First deployment after the audit — Omar's machine
 
+**Plan for 1–2 hours, longer if your recordings take a long time to copy/verify or you encounter a problem. The app will be stopped during the backup, rehearsal, and deployment. Don't do this right before something you need the app for.** This is an estimate, not a guarantee; leave time for recovery.
+
 This is a manual runbook, not a script to execute all at once. Run one command block at a time in Bash, read its result, and stop on an unexpected result. Commands below are for **you** to run; writing this document did not run a deployment, tests, backups, or service commands.
 
 **REQUIRED** means do not skip it. **OPTIONAL** means the condition is stated explicitly. Keep the same terminal open so the variables survive. A second terminal is only needed if you choose to watch logs continuously. Replace every `<PLACEHOLDER>` before executing its command; do not paste angle brackets into the shell.
 
 This deployment includes all completed audit batches together: immutable recording filenames and take-number repair, recurrence series and replay identities, verified database restore, loopback hosting and origin checks, environment-file configuration, release symlinks, and the new sync client with IndexedDB migrations. It does not complete the remaining mentoring, time-semantics, or workspace audit batches.
 
-## 1. REQUIRED — freeze writes and make a full, verified backup
-
-### Prepare without changing the running app
-
-**REQUIRED, on the laptop AND phone, in every browser/profile/origin you use:** open the old app while the old host still runs. Let it finish syncing. Confirm **zero pending tasks/operations AND zero queued recordings**, including recordings saved inside sessions. If the old UI exposes failed items, resolve/export those too. Write down counts and the names of a few familiar pieces, sessions, takes, and tasks. Then close all Cadence tabs and the installed PWA on both devices. Do not reopen the production app until section 5. The server backup below does **not** contain browser IndexedDB queues or unsent recording blobs.
-
-If the old queue will not drain, stop the deployment here. Preserve/export that browser's work first. Do not clear site data or uninstall the PWA to make the pending count disappear.
+## 0. REQUIRED — confirm the source you intend to deploy
 
 Go to the repository. **OK:** no error; **wrong:** directory not found.
 
 ```bash
 cd /home/omar/Development/Projects/Cadence
 ```
+
+Check for uncommitted changes. **OK:** no output; **wrong:** any listed file — stop and understand it before building. Do not discard changes to make this check pass.
+
+```bash
+git status --short
+```
+
+Check the branch. **OK:** exactly `main`; **wrong:** another name or no name (detached HEAD) — stop and select the intended source before continuing.
+
+```bash
+git branch --show-current
+```
+
+Read the latest commits. **OK:** the expected completed audit/runbook commits; **wrong:** an unfamiliar revision — stop and verify what you are about to deploy.
+
+```bash
+git log --oneline -3
+```
+
+Check tags on this exact commit. **OK for this runbook revision:** `deploy-steps-v2` is listed; **wrong:** no expected tag, even if an older completion tag exists somewhere in history. Later deliberate releases may have a different tag; verify that revision explicitly rather than assuming it is equivalent.
+
+```bash
+git tag --points-at HEAD
+```
+
+## 1. REQUIRED — freeze writes and make a full, verified backup
+
+### Prepare without changing the running app
+
+**REQUIRED origin inventory, before closing anything:** write down **EVERY URL you currently use** to open Cadence on the laptop and phone, including installed PWAs and each browser/profile. Record the scheme (`http`/`https`), exact hostname or IP, and port (HTTPS without an explicit port uses 443). Inspect the address bar; for an installed PWA, open its page in the browser to identify its URL. Examples are `http://127.0.0.1:5006`, `http://localhost:5006`, `http://<YOUR-LAPTOP-IP>:5006`, and your Tailscale HTTPS URL. Keep a separate queue-check tick beside **each origin on each device/profile**. Browser storage belongs to that exact origin; hostnames pointing at the same machine do not share it. The old direct `http://<IP>:5006` origins will stop reaching the API once the service binds to loopback. Drain their queues **now**, while the old host is still reachable; opening the new HTTPS site later will not transfer those queues.
+
+**REQUIRED, on the laptop AND phone, in every browser/profile/origin you use:** open the old app while the old host still runs. Let it finish syncing. Confirm **zero pending tasks/operations AND zero queued recordings**, including recordings saved inside sessions. If the old UI exposes failed items, resolve/export those too. Write down counts and the names of a few familiar pieces, sessions, takes, and tasks. Then close all Cadence tabs and the installed PWA on both devices. Do not reopen the production app until section 5. The server backup below does **not** contain browser IndexedDB queues or unsent recording blobs.
+
+If the old queue will not drain, stop the deployment here. Preserve/export that browser's work first. Do not clear site data or uninstall the PWA to make the pending count disappear.
 
 Set the known repository path and the repository's service name. **OK:** no output; if your installed service has a different name, change `CADENCE_UNIT` after the next command.
 
@@ -73,6 +103,42 @@ Check the existing DSP interpreter. **OK:** `DSP interpreter exists`; **wrong:**
 ```bash
 test -x "$CADENCE_REPO/tools/audio_analyzer/.venv/bin/python" && echo 'DSP interpreter exists'
 ```
+
+### REQUIRED — check disk space before stopping services or making the snapshot
+
+Measure the current media and database directories. **OK:** sensible sizes with no read errors; **wrong:** missing/unreadable paths. Call the media size **M** and the database-directory size **D** (including WAL) when budgeting space below.
+
+```bash
+du -sh "$CADENCE_REAL_ROOT/media" "$CADENCE_REAL_ROOT/db"
+```
+
+Check free space at the snapshot's parent directory. **OK:** sufficient `Avail` space for the budget below; **wrong:** insufficient space or an unexpected filesystem.
+
+```bash
+df -h /home/omar
+```
+
+Check free space at the dry-run's parent directory. **OK:** sufficient `Avail` space; **wrong:** insufficient space. On this machine `$HOME` is `/home/omar`, so this will normally show the **same** filesystem as the snapshot check; do not count its available space twice.
+
+```bash
+df -h "$HOME"
+```
+
+Check the real storage and build/release locations too. **OK:** room for database migration, new releases, and normal writes; **wrong:** a nearly full filesystem, even if another disk has space.
+
+```bash
+df -h "$CADENCE_REAL_ROOT" "$CADENCE_REPO"
+```
+
+Check the home filesystem type. **OK:** a persistent disk-backed filesystem; **wrong:** `tmpfs`/RAM-backed storage — stop and choose an actual disk location consistently throughout this runbook.
+
+```bash
+df -hT "$HOME"
+```
+
+**Space you need:** the media is copied **twice in addition to the existing live copy**: one snapshot plus one dry run. At rehearsal peak you therefore have about **3 × M total media**, with **2 × M additional free space required**. Budget at least **2 × (M + D) additional free space** for both copied data trees, **plus** the temporary and real release builds/build caches and migration working space. Leave additional headroom (at least 20% above that budget is prudent); do not aim to fill a filesystem. For example, 20 GiB of media and 1 GiB of database data need at least 42 GiB **free**, plus build/migration space and headroom, on the disks receiving the copies. The live copy already occupies its own space. If locations share a filesystem, add their requirements together and compare against its one `Avail` value; if they differ, budget each separately. A rollback rescue copy needs another copy of the then-current data; deleting the stopped dry run first normally frees its allocation, but recheck space before recovery.
+
+**Do not put the dry run in `/tmp`.** On Arch, `/tmp` is usually RAM-backed `tmpfs`; copying all recordings there can fill memory. Section 2 creates a uniquely named directory on your home disk instead. If space is insufficient, stop here and arrange a disk-backed destination before copying anything.
 
 ### Stop the writer and preserve a matched snapshot
 
@@ -174,19 +240,19 @@ The repository's normal scheduled backup is `deploy/backup-db.sh` (SQLite backup
 
 ### Restore into a fresh, disposable root
 
-Create a unique dry-run root and record it. **OK:** a new `/tmp/cadence-dryrun.*` path; **wrong:** creation fails. A unique folder avoids deleting/reusing somebody else's `/tmp/cadence-dryrun`.
+Create a unique dry-run root **on your home disk** and record it. **OK:** a new `/home/omar/cadence-dryrun.XXXXXXXX`-style path; **wrong:** creation fails or the path is on RAM-backed storage. A unique folder avoids deleting/reusing another rehearsal's data.
 
 ```bash
-export CADENCE_DRYRUN="$(mktemp -d /tmp/cadence-dryrun.XXXXXXXX)"; printf '%s\n' "$CADENCE_DRYRUN"
+export CADENCE_DRYRUN="$(mktemp -d "$HOME/cadence-dryrun.XXXXXXXX")"; printf '%s\n' "$CADENCE_DRYRUN"
 ```
 
 Guard the selected paths. **OK:** `Dry-run paths are separate`; **wrong:** no success message. Do not continue unless the paths are separate real directories, not symlinks.
 
 ```bash
-test "$(realpath "$CADENCE_DRYRUN")" != "$(realpath "$CADENCE_REAL_ROOT")" && test "$(realpath "$CADENCE_DRYRUN")" != "$(realpath "$CADENCE_SNAPSHOT")" && test ! -L "$CADENCE_DRYRUN" && echo 'Dry-run paths are separate'
+case "$CADENCE_DRYRUN" in "$HOME"/cadence-dryrun.[[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]]) test -d "$CADENCE_DRYRUN" && test ! -L "$CADENCE_DRYRUN" && test "$(realpath "$CADENCE_DRYRUN")" != "$(realpath "$CADENCE_REAL_ROOT")" && test "$(realpath "$CADENCE_DRYRUN")" != "$(realpath "$CADENCE_SNAPSHOT")" && echo 'Dry-run paths are separate' ;; *) printf 'REFUSING: unexpected dry-run path\n' ;; esac
 ```
 
-Restore **only into the copy**, explicitly supplying both root variables. **OK:** `Database successfully restored and verified at /tmp/cadence-dryrun.../db/app.db`; **wrong:** an error or any destination outside that temporary root. Do not bypass the service-active check.
+Restore **only into the copy**, explicitly supplying both root variables. **OK:** `Database successfully restored and verified at /home/omar/cadence-dryrun.../db/app.db`; **wrong:** an error or any destination outside that disposable root. Do not bypass the service-active check.
 
 ```bash
 CADENCE_STORAGE_ROOT="$CADENCE_DRYRUN" Cadence__StorageRoot="$CADENCE_DRYRUN" CADENCE_SERVICE_UNIT="$CADENCE_UNIT" bash "$CADENCE_REPO/deploy/restore-db.sh" "$CADENCE_SNAPSHOT/app.db"
@@ -206,13 +272,13 @@ diff -qr "$CADENCE_SNAPSHOT/media" "$CADENCE_DRYRUN/media" && find "$CADENCE_DRY
 
 ### Build without activating the production symlink
 
-Build a release in the temporary deploy directory, skipping dependency installation. **OK:** `Cadence production release activated!` with **Active under `/tmp/cadence-dryrun.../deploy/current`**; **wrong:** failed build or a production `deploy/current` target. Despite the message, this only activates the temporary directory. It builds frontend assets in the repo and publishes into the temporary release directory; it does not start an API or migrate the real database.
+Build a release in the disposable deploy directory, skipping dependency installation. **OK:** `Cadence production release activated!` with **Active under `/home/omar/cadence-dryrun.../deploy/current`**; **wrong:** failed build or a production `deploy/current` target. Despite the message, this only activates the disposable directory. It builds frontend assets in the repo and publishes into the disposable release directory; it does not start an API or migrate the real database.
 
 ```bash
 CADENCE_DEPLOY_DIR="$CADENCE_DRYRUN/deploy" CADENCE_SKIP_VENV_SETUP=1 bash "$CADENCE_REPO/deploy/build-release.sh"
 ```
 
-Write a **new, non-secret dry-run env file**, not a copy of your real env file. **OK:** no error; **wrong:** write failure. Both storage variables point only to the copy. A blank key prevents Gemini calls. The explicit DSP paths avoid falling back to any interpreter in your real storage root. The synthetic tests later are not an evaluation of mentoring quality.
+Write a **new, non-secret dry-run env file**, not a copy of your real env file. **OK:** no error; **wrong:** write failure. Both storage variables point only to the copy. This newly created file deliberately contains a blank key to override any inherited key; it does not alter or delete your real key. The explicit DSP paths avoid falling back to any interpreter in your real storage root. **Audit B08 is not fixed:** missing/failed Gemini can produce fabricated fallback assessments that change weakness tracking. Browse existing data without reanalysis; use only the synthetic test piece for any test uploads and delete that piece after the tests.
 
 ```bash
 cat > "$CADENCE_DRYRUN/dryrun.env" <<EOF
@@ -307,10 +373,24 @@ Confirm the temporary host is gone. **OK:** `inactive` or unit-not-found (becaus
 systemctl --user is-active cadence-dryrun.service
 ```
 
-Delete **only** the uniquely named temporary root, after verifying its prefix. **OK:** no error; **wrong:** refusal or unexpected path. This deletes its copied database/media and release, never the saved snapshot or production root. Do not replace the variable with the real storage root.
+Delete **only** the uniquely named disposable root, after verifying its parent, eight-character suffix, and separation from the saved/live roots. **OK:** no error; **wrong:** refusal, failed guard, or unexpected path. This deletes its copied database/media and release, never the saved snapshot or production root. Do not change `$HOME` or replace the variable with the real storage root.
 
 ```bash
-case "$CADENCE_DRYRUN" in /tmp/cadence-dryrun.*) test -d "$CADENCE_DRYRUN" && test ! -L "$CADENCE_DRYRUN" && rm -rf -- "$CADENCE_DRYRUN" ;; *) printf 'REFUSING: unexpected dry-run path\n' ;; esac
+case "$CADENCE_DRYRUN" in "$HOME"/cadence-dryrun.[[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]][[:alnum:]]) test -d "$CADENCE_DRYRUN" && test ! -L "$CADENCE_DRYRUN" && test "$(realpath "$CADENCE_DRYRUN")" != "$(realpath "$CADENCE_REAL_ROOT")" && test "$(realpath "$CADENCE_DRYRUN")" != "$(realpath "$CADENCE_SNAPSHOT")" && rm -rf -- "$CADENCE_DRYRUN" ;; *) printf 'REFUSING: unexpected dry-run path\n' ;; esac
+```
+
+> **ABORT BEFORE SECTION 3:** if anything fails in sections 0–2, stop. No production release, unit/env configuration, database, or media has been changed by these steps; the only production operational changes are that services/timer were stopped. Snapshot files and disposable rehearsal/build artifacts may have been created. If the dry-run service started, stop it with the section 2 command; leave its folder for diagnosis if needed. Do **not** run the real deploy or restore a backup just to resume the old app. Use the two commands below to resume the old service and its existing backup timer. If you have not stopped them yet, no recovery start is needed.
+
+Start the unchanged old app using its recorded unit name (`CADENCE_UNIT` from section 1). **OK:** start succeeds and the old service is active; **wrong:** start failure — inspect its existing logs, do not proceed to deployment. If this is a new terminal, set `CADENCE_UNIT` to the unit name you recorded first.
+
+```bash
+systemctl --user start "$CADENCE_UNIT"
+```
+
+Restart the old backup timer **if it was installed and running before this attempt**. **OK:** timer starts; **wrong:** unexpected error. Do not install a new timer as part of aborting. Reopen the old app only after its host is running.
+
+```bash
+systemctl --user start cadence-backup.timer
 ```
 
 ## 3. REQUIRED — configure and deploy the real release
@@ -355,7 +435,9 @@ CADENCE_DSP_SCRIPT=/home/omar/Development/Projects/Cadence/deploy/current/tools/
 CADENCE_DSP_PYTHON=/home/omar/Development/Projects/Cadence/tools/audio_analyzer/.venv/bin/python
 ```
 
-**REQUIRED for the no-external-media smoke tests:** temporarily leave the `GEMINI_API_KEY` setting blank. Record privately whether you must restore a key later; the saved pre-deploy env file preserves an existing key without printing it. Also remove/comment any old `Cadence__GeminiApiKey` setting if you had introduced one. Do not use real practice media for uploads/tests, even with a blank key; mentoring fallback correctness is a later audit batch. After deployment you decide separately whether to enable external analysis.
+**REQUIRED for the no-external-media smoke tests:** **comment out** your existing `GEMINI_API_KEY` line by adding a leading `#`; do not delete the line or erase the key. Also comment out any old `Cadence__GeminiApiKey` line if present, and make sure you have not separately configured a key in the user service/manager. Keep its value private. Section 1's snapshot already holds the original env-file copy. The next service restart applies these edits. After all synthetic tests and cleanup, if you choose to resume external analysis, reopen this same file, remove the leading `#` from the intended key line, save, and restart `cadence.service` using the command below. There is no need to retype or print the secret.
+
+**WARNING — audit B08 is NOT fixed yet:** whenever Gemini is missing **or a Gemini call fails**, the mentoring fallback can fabricate an assessment and change weakness tracking. A displayed assessment is not proof that Gemini succeeded. Use **only the synthetic `DEPLOY TEST piece`** for upload/analysis smoke tests; never reanalyze a real piece to test deployment. **Delete the synthetic piece after checking/exporting the test results and draining its queue**, so fabricated test assessments/weaknesses do not remain. Re-enabling the key does not fix fallback behavior on future Gemini failures.
 
 If you already know the Tailscale HTTPS origin, add it to the comma-separated allow-list now. Otherwise section 4 explains how to find it. Do not disable the origin check to solve configuration errors.
 
@@ -491,13 +573,17 @@ tailscale serve status
 
 **REQUIRED:** in your private env editor, append that exact HTTPS **origin** (scheme + hostname, no URL path) to `Cadence__AllowedOrigins`, preserving the localhost entries. Use the edit command in section 3, save, then the restart command there. If forwarded Host headers already match it might work without the entry, but an explicit entry makes the intended origin clear. Keep `Cadence__EnableOriginCheck=true`.
 
-On the phone, connect Tailscale to the same tailnet, then open the exact HTTPS URL from Serve status in Chrome. `localhost` on the phone means the phone, not this laptop. Use HTTPS: the new outbox requires Web Locks in a secure context. Plain HTTP to a LAN IP may pause sync. Do not change the phone's origin casually: IndexedDB and its queue belong to the original scheme/hostname/port. Keep the old origin accessible until its queue is verified empty.
+On the phone, connect Tailscale to the same tailnet, then open the exact HTTPS URL from Serve status in Chrome. `localhost` on the phone means the phone, not this laptop. Use HTTPS: the new outbox requires Web Locks in a secure context.
+
+**REQUIRED when moving from the old `http://<IP>:5006` phone URL to Tailscale HTTPS:** this is a **NEW origin with an empty local IndexedDB database**, not an in-place migration of the old origin's cache or queue. The server still has your verified pieces, sessions, takes, and tasks; the new client downloads those into its new local cache. It cannot see or transfer unsent work stored under the old URL. This switch is safe **only because every old-origin queue was verified empty in section 1**. The old direct-IP URL will stop working when the host binds only to loopback, even over Tailscale IP access; adding that URL to the origin allow-list does not restore the old network listener.
+
+After confirming server data in the new HTTPS page, choose Chrome's **Install app / Add to Home screen** to install a **fresh PWA for the HTTPS origin**. Use that new installation, not the old HTTP shortcut/PWA. Keep the old origin's storage/installation untouched until you have confirmed its queue was empty and the new app has all server data. If the inventory shows you already used this exact HTTPS origin, this is an existing-origin update instead; follow section 5 without creating or clearing a database. The same origin distinction applies to laptop URLs from your inventory.
 
 ## 5. REQUIRED — update the PWA without deleting its offline queue
 
 **Before the first production update:** you already checked the old client on **each** device/profile/origin for zero pending operations and zero queued recordings in section 1. A server backup cannot recover unsent browser work. If you missed that step and the old client remains open, inspect/drain it before reloading. Do not use Clear storage, Clear site data, delete IndexedDB, reset the browser, or uninstall the PWA as an update mechanism.
 
-The PWA uses `vite-plugin-pwa` with `registerType: autoUpdate`. Closing and reopening with network access normally updates it, but a service worker can keep an old client alive. Update **all** tabs; mixing old clients with the new server is unsafe because the old `/toggle` endpoint no longer accepts completion mutations.
+The PWA uses `vite-plugin-pwa` with `registerType: autoUpdate`. Closing and reopening with network access normally updates it, but a service worker can keep an old client alive. Update **all** tabs; mixing old clients with the new server is unsafe because the old `/toggle` endpoint no longer accepts completion mutations. The worker-update and in-place Dexie instructions below apply to an **unchanged origin**. A move from the old phone HTTP URL to HTTPS instead follows section 4's fresh-install path; there is no old Dexie queue to migrate at the new origin.
 
 ### Laptop Chrome/Chromium
 
@@ -509,7 +595,7 @@ The PWA uses `vite-plugin-pwa` with `registerType: autoUpdate`. Closing and reop
 ### Android Chrome / installed PWA
 
 1. Close the installed Cadence window and every Chrome Cadence tab. Keep phone network and Tailscale online.
-2. Open the exact same HTTPS URL in Chrome; reload and wait for the worker update. Close it, then reopen the installed PWA.
+2. If your previous origin was already this exact HTTPS URL, open it in Chrome; reload and wait for the worker update. Close it, then reopen its installed PWA. If you are moving from HTTP to HTTPS, follow section 4 and install the new HTTPS PWA instead of reopening the old HTTP installation.
 3. If it stays stale, inspect that phone tab from laptop Chrome via `chrome://inspect/#devices` (USB debugging must be enabled/authorized on the phone), then use Application → Service Workers → **Update**, or **Unregister only**, followed by reopening online. This is preferable to clearing Android app/browser storage.
 4. If remote inspection is unavailable and the UI is still old, stop and get help with the worker update. Do not sacrifice an unknown queue to force it.
 
@@ -520,7 +606,7 @@ There is **no in-app build/version badge** in this release. Health JSON confirms
 Read the production build's JavaScript bundle filename. **OK:** an `index-<hash>.js` asset path; **wrong:** no entry script or a missing frontend file. Keep this filename for comparison.
 
 ```bash
-rg -o '/assets/[^" ]+\.js' "$CADENCE_REPO/deploy/current/wwwroot/index.html"
+grep -E -o '/assets/[^" ]+\.js' "$CADENCE_REPO/deploy/current/wwwroot/index.html"
 ```
 
 In laptop DevTools Network (or the phone's remote DevTools), reload and compare the loaded entry bundle URL with that filename. They must match. In the new UI, **Inspect sync work** must open the panel; recording entries have separate **Export details (JSON)** and **Download recording** buttons. An empty panel naturally has no recording buttons. Do not use that absence alone as a version test.
@@ -546,7 +632,7 @@ Use conspicuously named synthetic items such as `DEPLOY TEST task`, a new `DEPLO
 | Task create and complete | Add one nonrecurring `DEPLOY TEST task`, wait for sync, complete it, then refresh. | Exactly one task exists, completed, with no queued/error item. A temporary optimistic row is normal; a second row is not. |
 | Recurrence | Add a **new**, dated Daily task, complete it once, wait for sync, then inspect the next day/week view and refresh. Optionally reopen/complete its predecessor again. | Exactly one canonical next occurrence for that series/date; repeating completion does not add another. Old legacy tasks can be independent series; use a new task for this test. A previously deleted successor intentionally does not resurrect. |
 | Take upload | In the synthetic piece/session, upload one short synthetic WAV, wait for completion, refresh. | Exactly one take; playback works. Retrying the same queued request must not create a second take. Do not manually initiate a new upload of the file and call that a retry: that is a new take. |
-| Offline replay | While the loaded client is open, turn off the phone/laptop network, add one uniquely named task, then turn network/Tailscale back on and wait. | One pending operation while offline; exactly one server task after reconnect and refresh, pending returns to zero. If creation hangs because a view awaits a stalled refresh, record that limitation; cached-read blocking is an unfinished audit batch. |
+| Offline replay | Load the app online first. **Laptop on `127.0.0.1`:** open DevTools → Network and choose **Offline** in the throttling dropdown, then add one uniquely named task. Restore **No throttling** (or the prior online setting) and wait. **Phone:** turn off Wi-Fi/mobile data or disconnect Tailscale so the host is unreachable, add a uniquely named task, then restore connectivity and Tailscale and wait. | Turning off laptop Wi-Fi alone does **not** disconnect its loopback API; use DevTools Offline for this test. Expect one pending operation while offline; exactly one server task after reconnect and refresh, pending returns to zero. If creation hangs because a view awaits a stalled refresh, record that limitation; cached-read blocking is an unfinished audit batch. |
 | Two tabs | Open two updated tabs on the **same origin**, make one uniquely named task in one tab, wait/refresh both. | One task on the server, no duplicate recording/task sends and no persistent “lock busy” error. Two deliberate Add clicks are two user operations, not this test. |
 | Delete/re-upload | Upload test takes A and B in the synthetic session. Play B. Delete **A only**, then upload a different synthetic C. Play B again and C after refresh. | B retains its original bytes/playback, C appears once, A stays deleted. Take numbering need not reuse the gap; filenames are based on take identity so C cannot overwrite B. |
 | Phone sync-panel export | Prepare a queued synthetic recording on the phone: open a test session first, turn its network off, queue a small synthetic recording, then open **Inspect sync work**. Tap **Export details (JSON)** once and **Download recording** once. | Two deliberate taps each download one file; JSON has metadata and the recording opens with expected bytes/size. No single tap triggers two downloads. If Android blocks a download, grant its download permission and repeat that button only. Reconnect, let this test recording sync exactly once, and confirm the queue returns to zero. |
@@ -562,14 +648,14 @@ with wave.open('/tmp/cadence-deploy-test.wav', 'wb') as output:
 PY
 ```
 
-**REQUIRED:** record pass/fail on both devices, inspect the sync panel after tests, and preserve any unexpected work before cleanup. Remove only clearly identified synthetic test items after verifying their results. Do not infer Gemini assessment quality from these tests; that audit remediation is not yet implemented.
+**REQUIRED:** record pass/fail on both devices, inspect the sync panel after tests, and preserve any unexpected work before cleanup. Restore laptop DevTools Network to **No throttling** and restore the phone's network/Tailscale. Once the synthetic queue is drained and test results are checked/exported, **delete the entire synthetic `DEPLOY TEST piece`**, including its test sessions/takes and any fallback-generated weaknesses, plus the clearly identified synthetic tasks. Do not delete real pieces or recordings. Audit B08 remains unfixed: missing/failed Gemini can fabricate assessments and alter weakness tracking; these tests establish deployment behavior, not mentoring quality. If you choose to re-enable Gemini, un-comment the preserved key line and restart as described in section 3.
 
 ## 7. IF NEEDED — resolve 403 origin failures without discarding work
 
 Read rejected-origin log messages. **OK:** a message such as `Rejected cross-origin POST ... from Origin 'https://...'`; **wrong:** no matching message means this may be another failure, not an origin-guard error. Logs include the request Origin, Host, and X-Forwarded-Host, not your secret env file.
 
 ```bash
-journalctl --user -u cadence.service -n 200 --no-pager | rg 'Rejected cross-origin|Origin'
+journalctl --user -u cadence.service -n 200 --no-pager | grep -E 'Rejected cross-origin|Origin'
 ```
 
 Open the private env file locally. **OK:** editor opens/saves; **wrong:** permission or file error. Add the exact **trusted** rejected Origin to `Cadence__AllowedOrigins`, comma-separated, retaining existing entries. Include the scheme and port when present; do not add the API path, a wildcard, or an unfamiliar origin. Keep `Cadence__EnableOriginCheck=true`.

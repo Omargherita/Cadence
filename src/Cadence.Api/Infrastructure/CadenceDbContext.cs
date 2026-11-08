@@ -35,6 +35,7 @@ public class CadenceDbContext : DbContext
         modelBuilder.Entity<TaskItem>(entity =>
         {
             entity.HasKey(t => t.Id);
+            entity.HasIndex(t => new { t.SeriesId, t.OccurrenceDate }).IsUnique();
             entity.Property(t => t.Title)
                 .IsRequired()
                 .HasMaxLength(200);

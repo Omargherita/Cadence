@@ -40,6 +40,27 @@ public static class DatabaseSchema
                     "CREATE UNIQUE INDEX IF NOT EXISTS IX_PracticeTakes_PracticeSessionId_TakeNumber ON PracticeTakes (PracticeSessionId, TakeNumber);");
                 await db.Database.ExecuteSqlRawAsync("INSERT INTO CadenceSchemaVersions (Version) VALUES (2);");
             }
+            if (!await Exists("SELECT count(*) FROM CadenceSchemaVersions WHERE Version=3"))
+            {
+                foreach (var table in new[] { "Tasks", "Pieces", "PracticeSessions", "PracticeTakes" })
+                    if (!await Exists($"SELECT count(*) FROM pragma_table_info('{table}') WHERE name='CreateFingerprint'"))
+                    {
+                        // Identifiers come exclusively from the fixed list above, never request input.
+                        var sql = $"ALTER TABLE {table} ADD COLUMN CreateFingerprint TEXT;";
+                        await db.Database.ExecuteSqlRawAsync(sql);
+                    }
+                foreach (var column in new[] { "SeriesId", "OccurrenceDate", "NextOccurrenceId" })
+                    if (!await Exists($"SELECT count(*) FROM pragma_table_info('Tasks') WHERE name='{column}'"))
+                    {
+                        var sql = $"ALTER TABLE Tasks ADD COLUMN {column} TEXT;";
+                        await db.Database.ExecuteSqlRawAsync(sql);
+                    }
+                // Historical ancestry cannot be recovered from title/date. Preserve every row as its own series.
+                await db.Database.ExecuteSqlRawAsync("UPDATE Tasks SET SeriesId=Id, OccurrenceDate=COALESCE(ScheduledDate, date('now', 'localtime')) WHERE Recurrence<>0 AND SeriesId IS NULL;");
+                await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Tasks_SeriesId_OccurrenceDate ON Tasks (SeriesId, OccurrenceDate);");
+                // Old create payloads were not retained. Leave fingerprints NULL rather than invent history.
+                await db.Database.ExecuteSqlRawAsync("INSERT INTO CadenceSchemaVersions (Version) VALUES (3);");
+            }
             await transaction.CommitAsync();
         }
         finally { await db.Database.CloseConnectionAsync(); }

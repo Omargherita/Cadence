@@ -5,6 +5,9 @@ namespace Cadence.Api.Domain.PianoMentor;
 
 public class PracticeTake
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? CreateFingerprint { get; set; }
+
     public Guid Id { get; set; } = Guid.CreateVersion7();
 
     public Guid PracticeSessionId { get; set; }

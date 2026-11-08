@@ -4,6 +4,9 @@ namespace Cadence.Api.Domain.MusicalLibrary;
 
 public class Piece
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? CreateFingerprint { get; set; }
+
     public Guid Id { get; set; } = Guid.CreateVersion7();
 
     public string Title { get; set; } = string.Empty;

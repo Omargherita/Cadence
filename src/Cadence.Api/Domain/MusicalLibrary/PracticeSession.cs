@@ -5,6 +5,9 @@ namespace Cadence.Api.Domain.MusicalLibrary;
 
 public class PracticeSession
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? CreateFingerprint { get; set; }
+
     public Guid Id { get; set; } = Guid.CreateVersion7();
 
     public Guid PieceId { get; set; }

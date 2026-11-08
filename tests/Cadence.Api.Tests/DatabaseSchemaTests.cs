@@ -35,6 +35,38 @@ public class DatabaseSchemaTests
         finally { File.Delete(path); }
     }
     [Fact]
+    public async Task Version3PreservesAmbiguousLegacyTasksAndEnforcesOccurrenceUniqueness()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"cadence-schema-v3-{Guid.NewGuid()}.db");
+        try
+        {
+            await using var db = new CadenceDbContext(new DbContextOptionsBuilder<CadenceDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options);
+            await db.Database.EnsureCreatedAsync();
+            var first = new TaskItem { Title = "Same title", Recurrence = RecurrencePattern.Daily, ScheduledDate = new DateOnly(2026, 10, 23) };
+            var second = new TaskItem { Title = first.Title, Recurrence = first.Recurrence, ScheduledDate = first.ScheduledDate };
+            db.Tasks.AddRange(first, second);
+            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlRawAsync("DROP INDEX IX_Tasks_SeriesId_OccurrenceDate;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks DROP COLUMN SeriesId;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks DROP COLUMN OccurrenceDate;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks DROP COLUMN NextOccurrenceId;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks DROP COLUMN CreateFingerprint;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Pieces DROP COLUMN CreateFingerprint;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE PracticeSessions DROP COLUMN CreateFingerprint;");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE PracticeTakes DROP COLUMN CreateFingerprint;");
+            db.ChangeTracker.Clear();
+            await DatabaseSchema.InitializeAsync(db);
+            await DatabaseSchema.InitializeAsync(db);
+            var tasks = await db.Tasks.OrderBy(t => t.Id).ToListAsync();
+            Assert.Equal(2, tasks.Count);
+            Assert.All(tasks, t => { Assert.Equal(t.Id, t.SeriesId); Assert.Equal(first.ScheduledDate, t.OccurrenceDate); Assert.Null(t.CreateFingerprint); });
+            db.Tasks.Add(new TaskItem { Title = "Duplicate", SeriesId = tasks[0].SeriesId, OccurrenceDate = tasks[0].OccurrenceDate });
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task DeletingPieceCascadesThroughSessionsTakesAndWeaknesses()
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");

@@ -45,3 +45,9 @@ test('pieces sort by update time within their bucket',async()=>{
  await db.pieces.update('new',{updatedAtUtc:'2026',lastPracticedAtUtc:null});
  expect((await repo.getPieces()).map(p=>p.id)).toEqual(['new','old']);
 });
+test('null successor prevents resurrection and rapid toggles preserve the last desired state',async()=>{
+ await db.tasks.put({id:'t',title:'Practice',category:'Piano',priority:2,recurrence:'Daily',scheduledDate:'2026-11-08',isCompleted:false,completedAtUtc:null,updatedAtUtc:'2026',nextOccurrenceId:null});
+ await Promise.all([repo.toggleTask('t'),repo.toggleTask('t')]);await syncEngine.processOutbox();
+ expect(await db.tasks.count()).toBe(1);expect((await db.tasks.get('t'))?.isCompleted).toBe(false);
+ expect((await db.syncOutbox.orderBy('sequence').toArray()).map(i=>i.payload.isCompleted)).toEqual([true,false]);
+});

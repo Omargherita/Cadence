@@ -8,11 +8,11 @@
 
 **Active batch:** Batch 0 (active).
 
-**Current task:** B0.1 — verified-awaiting-record.
+**Next pending task:** B0.2.
 
 **Verified repository baseline:** `2c205e5f81fdf38a87abbd1767d662755f21f943` on `main`; working tree was clean before this document was created.
 
-**Completed rebuild tasks:** None. Existing commits are legacy history, not evidence of rebuild completion.
+**Completed rebuild tasks:** B0.1. Existing legacy commits are not evidence of rebuild completion.
 
 ## 1. Product contract and decision register
 
@@ -441,7 +441,17 @@ No durable message permalink or approval timestamp was supplied; do not infer on
 
 ### Task completion ledger
 
-B0.1 is `verified-awaiting-record`, work commit pending creation. Scope: finalized written product contract and architecture decision packet, with D01–D08 proposed. Evidence: `docs/batch-0/product-and-architecture.md`. Verification: manual cross-check of roadmap Sections 1–3 and current user instructions; all requirements and approval states covered; `git diff --cached --check` and staged file/content review before commit. No runtime tests applicable; no live feasibility claim. Date: 2026-11-10. All remaining tasks are `pending`, work commit `—`. No rebuild task is yet complete.
+#### B0.1 — completed
+
+- **Final scope:** Written product contract and architecture decision packet; all D01–D08 remain proposed.
+- **Work commit:** `a4deae7784457467ea0dae2592bb398846edd028`.
+- **Summary/evidence:** `docs/batch-0/product-and-architecture.md`, including workflow outcomes, exclusions, approval/evidence gates, and the manual review record. Work commit also preserves the previously untracked approved roadmap and records Batch 0 authorization.
+- **Verification performed:** Manually cross-checked roadmap Section 1 requirements/exclusions and every D01–D08 entry, Sections 2–3 execution/scope restrictions, and the current user message against the packet. Reviewed staged content with `git diff --cached -- PROJECT_ROADMAP.md` and `git diff --cached -- docs/batch-0/product-and-architecture.md`; ran `git diff --cached --check`, `git diff --exit-code`, and `git status --short`. Confirmed committed content with `git show --stat a4deae7784457467ea0dae2592bb398846edd028` and reachability with `git merge-base --is-ancestor a4deae7784457467ea0dae2592bb398846edd028 HEAD`.
+- **Outcome:** Documentation criteria passed; whitespace check passed; staged paths contained only the task packet and roadmap, without private assets or credentials. No failures or fixes required.
+- **Limitations:** Documentation review only; no runtime, packaging, transport or musical-quality claim. No stack approval inferred; no live experiment or upload. No approved deviations.
+- **Completion date:** 2026-11-10.
+
+All remaining tasks are `pending`, work commit `—`.
 
 The initial roadmap save was documentation-only setup outside the development batches. Its expected untracked state was verified before Batch 0; it is preserved and first committed with the B0.1 work and authorization record.
 
@@ -452,8 +462,8 @@ D01–D08 are proposed. No technical approval is inferred from prior assistant p
 ### Current handoff
 
 - **Active batch:** Batch 0, authorized and active.
-- **Current task:** B0.1 — verified-awaiting-record; work commit not yet created.
-- **Permitted now:** B0.1 decision documentation and verification within Batch 0.
+- **Next task:** B0.2 — pending; B0.1 completed.
+- **Permitted now:** Sequential Batch 0 work, subject to consent and decision gates.
 - **Not authorized:** Later batches, application initialization, legacy changes, archival operations, paid APIs, personal-material uploads, or pushing.
 - **Continuity verification (2026-11-10):** Read entire roadmap; inspected `git status --short --branch`, `git log -10 --format=fuller`, `git show HEAD -- docs/DEPLOY-STEPS.md`, staged and unstaged diffs, tracked-file inventory, legacy README and package manifests. HEAD is the recorded baseline on main. Only the expected untracked roadmap was present; both tracked diffs were empty. No completed task SHAs require reconciliation. Legacy commit/task labels do not represent rebuild progress. No discrepancy found.
-- **Next action:** Finish and verify B0.1; create its work commit, then its separate roadmap record commit.
+- **Next action:** Inspect B0.2 prerequisites; stop and report if corpus, ground truth, consent, or account-use decisions require user input.

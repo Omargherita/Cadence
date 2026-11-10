@@ -1,5 +1,7 @@
 # Cadence — Project Roadmap
 
+**Standing instruction for every agent and thread:** Read this roadmap before acting. Independently complete the currently authorized batch, make and document technical decisions, and normally request user approval only at the next batch boundary. Do not ask the user to repeat this preference. Follow Section 2's standing autonomy policy and retained consent gates.
+
 **Document state:** Approved for saving, including the user's execution and consent clarifications; saved as the central project roadmap.
 
 **Project phase:** Batch 0 product decisions and feasibility research; no production implementation authorized.
@@ -98,6 +100,22 @@ The user is not a software engineer and explicitly delegates technical details t
 - When a user decision is necessary, explain the practical effect in plain language and give a recommendation. Do not turn it into an engineering questionnaire.
 - This delegation supersedes older generic requirements for user technical or architecture approval, including those in supporting decision packets. It does not supersede specific limits on experiments, uploads, provider/account use, spending, task order, or batch Go messages.
 - The current B0.2 follow-up listening test still requires its expressly requested review and consent. This policy change alone does not authorize any new run or upload.
+
+### Standing autonomy and minimal-question policy
+
+This is a persistent project instruction for every future thread and agent, not a preference that expires with a conversation. The user should not need to restate it. Apply it together with the technical decision authority above and the continuity checks in Section 4.
+
+- **Default behavior:** After verifying an authorized batch and its prerequisites, carry out its tasks sequentially through verification, work commits, and roadmap-record commits. Do not stop after each task to ask “Should I continue?” or offer to do work already authorized.
+- **Engineering ownership:** Research and resolve technical questions yourself. For non-blocking ambiguities, choose a reasonable approach, record the assumption and rationale, and proceed within the authorized scope. Do not ask the user to select an implementation strategy or fix a technical problem.
+- **Normal approval checkpoint:** Complete and verify the current batch, report its outcome and the next batch's objective/tasks, then ask for “Go for Batch N” and stop. Do not start the next batch early.
+- **Cross-thread continuation:** A thread change alone neither revokes nor extends authorization. Reconcile this roadmap with Git, then resume the next unfinished task in the already authorized batch without asking again for the same Go. Honor any later pause, revocation, restart instruction, or explicit requirement for renewed approval.
+- **Ask only when genuinely necessary:** Interrupt execution for a material product/scope or acceptance-criteria decision, new spending, unapproved destructive action, privacy/data-handling change, missing purpose-specific personal-material upload consent, an explicit approval restriction, or essential user information/musical judgment that investigation cannot supply. Preserve the stop-and-report rule for repository discrepancies; do not conceal a blocker to avoid asking a question.
+- **Anticipate and consolidate:** Before a batch starts, identify foreseeable user decisions and consent needs and present them together with a plain-language recommendation. During a batch, bundle related unavoidable questions instead of sending them one at a time. Explain the concrete blocker and why the agent cannot decide it independently.
+- **Reuse valid answers:** Check the approval and consent ledger before asking. Do not request the same permission again while it remains valid for the exact materials, destination, purpose, actions, and limits already authorized. New purposes, exhausted run limits, or changed destinations are not covered by earlier consent.
+- **Keep updates informational:** Give concise progress updates without turning them into approval requests. If blocked, record the exact blocker and next required action; do not skip to another task or mark the batch complete.
+- **Handoff responsibility:** Before ending a thread, record current task/status, work and record commits, verification evidence, uncommitted work, applicable approvals/consents and their limits, outstanding decisions, and the precise next action. A new agent must be able to continue without asking the user to reconstruct prior context.
+
+This policy does not authorize a rollback, a new batch, additional provider runs, uploads, spending, pushes, or relaxation of quality gates. In particular, the specific B0.2 follow-up test approval boundary remains in force.
 
 ### One-task execution loop
 
@@ -369,8 +387,8 @@ Freeze exact denominators and scoring rules in B0.2 before testing. Do not lower
 
 Before changing anything in a continuation thread:
 
-1. Read this entire roadmap.
-2. Identify the active batch, its authorization, and next task.
+1. Read this entire roadmap and apply the standing autonomy/minimal-question policy without asking the user to repeat it.
+2. Identify the active batch, its authorization, next task, existing consents, and any later pause or restriction.
 3. Run `git status` and inspect `git log`.
 4. Review relevant work and roadmap-record commits with `git show`.
 5. Inspect staged and unstaged changes with `git diff`.
@@ -455,6 +473,14 @@ No durable message permalink or approval timestamp was supplied; do not infer on
 - **Verification:** Reviewed the roadmap diff against the user instruction; Python comparisons confirmed every batch task row, batch authorization entry, and development task ledger is unchanged. Checked retained batch, consent, Git, and experiment boundaries; `git diff --check` passed. Only `PROJECT_ROADMAP.md` changed. Documentation-only review; no application tests or provider runs were needed or performed.
 - **Historical treatment:** Prior approval and experiment records are retained. The new policy overrides generic technical-sign-off requirements, not specific consent or experiment restrictions.
 
+### POLICY-02 — Persistent autonomy across threads
+
+- **Authority:** User request in this conversation: “The work will be on a lot of thread so I don't want every time to tell the agent that I don't want many questions and to let it decide by itself what it should do so if you can edit the md file that would be great”. No durable message permalink or exact timestamp supplied.
+- **Scope:** Roadmap-only standing instruction for all future agents: execute an authorized batch independently, decide technical details, reuse valid decisions/consents, consolidate unavoidable questions, and preserve complete handoff records.
+- **Status:** verified-awaiting-record; work commit pending. This amendment does not advance any development task or authorize rollback/provider work.
+- **Verification:** Read the complete roadmap and inspected Git history/status/diffs; all recorded SHAs are reachable. Reviewed the policy diff and used Python comparisons to verify all task rows, the batch authorization ledger, and the development task ledger remain unchanged. Checked retained consent/experiment/Git gates and ran `git diff --check`; passed. Only `PROJECT_ROADMAP.md` changed. No application tests required for this documentation-only amendment.
+- **Preserved boundaries:** Existing batch Go, personal-material consent, costs, destructive-action restrictions, experiment limits, Git discipline, verification requirements, and the B0.2 blocker remain in force.
+
 ### Batch authorization ledger
 
 - **Batch:** 0 only.
@@ -517,6 +543,8 @@ The initial roadmap save was documentation-only setup outside the development ba
 D01–D08 remain technical candidates, not validated selections. The subsequent user delegation authorizes the agent to select and revise technical details with recorded reasoning, without user technical sign-off. Historical records describing these candidates as unapproved are preserved as records of their earlier state; they do not create a continuing technical-approval requirement. Explicit experiment, upload, cost, and batch restrictions remain binding.
 
 ### Current handoff
+
+- **Standing working preference:** Every agent applies Section 2 automatically: decide technical details and complete authorized tasks without repeated questions; normally request Go only at the next batch boundary. Reuse verified authorization across threads unless the user explicitly changes it.
 
 - **Technical decision authority:** Agents own technical choices and document their rationale under Section 2; no user technical sign-off is required. Product/consent boundaries and the recorded B0.2 blocker remain unchanged.
 

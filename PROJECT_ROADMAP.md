@@ -33,9 +33,9 @@ Separate paid APIs are contingency options only. Explain the technical need and 
 
 Start with fresh application data. Preserve and archive the existing project and data when the relevant batch is authorized. Preserve all Git history. No archival action is currently authorized.
 
-### Technical decisions: proposed, not yet approved
+### Technical decisions: candidates for agent evaluation
 
-| ID | Proposed decision | Rationale and approval condition |
+| ID | Technical candidate | Rationale and validation condition |
 |---|---|---|
 | D01 | Electron, React, TypeScript, Vite, Electron Forge | One main language and consistent desktop rendering. Confirm after feasibility and Linux packaging review. |
 | D02 | SQLite with better-sqlite3; recordings stored as files | Durable local ownership without a synchronization system. Confirm native-module packaging. |
@@ -46,7 +46,7 @@ Start with fresh application data. Preserve and archive the existing project and
 | D07 | Vitest, integration tests, Playwright, packaged Linux smoke checks | Verify rules, persistence, integration failures, and actual desktop behavior. |
 | D08 | New application alongside preserved legacy sources | Introduce a separate desktop source tree and separate application-data location; do not overwrite the old deployment. |
 
-Approval of this roadmap does not automatically mark these decisions approved. Record explicit decisions and their supporting evidence during Batch 0. Any material change requires user approval before dependent implementation.
+D01–D08 remain candidates until the agent evaluates and records its selections; this policy update does not claim that they have been validated. The user delegates technical and architectural choices to the agent. Select or revise them using best engineering judgment within authorized product scope, record the reasoning and evidence, and proceed without asking the user to choose technologies or approve engineering details. The retained user approval gates in Section 2 still apply.
 
 ### MVP boundaries
 
@@ -78,13 +78,26 @@ Deferred capabilities are not executable batches. Promote them into separately a
 - A Go authorizes only that batch's recorded scope. Tasks within the authorized batch may proceed sequentially without requesting approval after every task.
 - A new thread, general discussion, roadmap approval, or silence is not a Go.
 - Preserve the authorization record across threads; continuing an already authorized batch does not require a new Go unless its scope changes.
-- If a task reveals a decision that changes the agreed scope, architecture, cost, or data handling, stop and ask for approval before proceeding with the affected work.
+- Technical and architectural decisions are delegated to the agent under the technical decision authority below. Ask only when a decision changes the agreed product scope or user-visible commitments, incurs new costs, changes privacy/data-sharing/retention commitments, requires destructive action, or exceeds an explicit authorization or consent boundary.
 - Never upload personal recordings, scores, private documents, or other user-owned material to external providers without the user's explicit consent for that specific purpose. Access to files or an account, roadmap approval, and a batch Go do not constitute that consent.
 - Batch authorization does not override separate consent requirements for uploads, paid services, or destructive operations.
 - Never push without an explicit request.
 - Never amend, squash, rebase, reset away, or otherwise rewrite existing commits without explicit authorization.
 
 An approval entry must record the batch, exact user instruction, date, available conversation reference, and scope restrictions. Never invent missing approval evidence.
+
+### Technical decision authority
+
+The user is not a software engineer and explicitly delegates technical details to the agent. Do not ask the user to select frameworks, libraries, database schemas, protocols, architecture patterns, file layouts, testing tools, or implementation techniques. Use investigation and best judgment to choose a maintainable approach that serves the agreed product requirements.
+
+- Make technical decisions within the authorized batch and task; resolve implementation problems autonomously when they do not cross a retained approval boundary.
+- This includes architectural refinements and internal data representations. Preserve promised behavior, local ownership, security, privacy, and consent boundaries.
+- Record each significant decision in this roadmap's decision register or architectural decision history: decision ID/date, problem, chosen approach, alternatives considered, rationale/tradeoffs, supporting verification, and affected tasks. Link supporting research when useful; keep the decision and status here as the source of truth.
+- Separate a design choice from a verified capability. Do not label a provider, model, library, or architecture qualified without the required evidence.
+- If a technical candidate fails, choose and document another approach within these boundaries. Ask only about a consequential product, spending, consent, or destructive-action choice—not how to implement it.
+- When a user decision is necessary, explain the practical effect in plain language and give a recommendation. Do not turn it into an engineering questionnaire.
+- This delegation supersedes older generic requirements for user technical or architecture approval, including those in supporting decision packets. It does not supersede specific limits on experiments, uploads, provider/account use, spending, task order, or batch Go messages.
+- The current B0.2 follow-up listening test still requires its expressly requested review and consent. This policy change alone does not authorize any new run or upload.
 
 ### One-task execution loop
 
@@ -100,9 +113,9 @@ For every task:
 8. Record the full commit hash, summary, verification results, and limitations.
 9. Commit that roadmap record before starting another task.
 
-If a requirement is unclear or a dependency is missing, mark the task blocked and document why. Do not silently change scope or bypass the dependency.
+Resolve technical ambiguity through inspection, research, tests, and engineering judgment; do not ask the user to make engineering choices. If an essential product requirement remains unclear or a dependency is genuinely unavailable, mark the task blocked and document why. Do not silently change product scope or bypass the dependency.
 
-Small fixes necessary to satisfy the current task stay within that task. A new requirement or architectural change becomes a proposed roadmap amendment requiring approval when it changes the agreed plan. Stop for decisions affecting scope, architecture, cost, or data handling; do not treat sequential task authorization as permission to make those changes.
+Small fixes necessary to satisfy the current task stay within that task. Record technical or architectural refinements and their rationale without requesting technical approval. New product requirements, altered acceptance criteria, task-order changes, or decisions crossing a retained approval boundary require approval; technical autonomy does not authorize skipping tasks, lowering verification standards, or starting another batch.
 
 ### Commit convention and hash recording
 
@@ -207,7 +220,7 @@ Freeze exact denominators and scoring rules in B0.2 before testing. Do not lower
 
 **Scope:** Archival verification, new application shell, build tooling, and process boundaries. No planner or coaching features.
 
-**Entry:** Batch 0 passed, architecture approved, and explicit Go for Batch 1.
+**Entry:** Batch 0 passed, architecture selected and documented by the agent with supporting evidence, and explicit Go for Batch 1.
 
 | Task | Scope and deliverable | Acceptance criteria | Required verification |
 |---|---|---|---|
@@ -403,7 +416,7 @@ Avoid rerunning expensive live evaluations unnecessarily. Reuse recorded evidenc
 | Musical listening quality and repeatability | Unverified | B0.5 |
 | Exact provider account eligibility and allowances | Must be measured through existing access | B0.3–B0.5 |
 | Evaluation recordings, ground truth, and upload consent | Required before live experiments | B0.2 |
-| Technology stack approval | Proposal only | B0.1/B0.V |
+| Technology stack selection and validation | Agent-owned decision; candidates await evidence, not user technical approval | B0.1/B0.V |
 | PDF reading and passage alignment accuracy | Do not assume exact note-level understanding | B0.4–B0.5 |
 | Archival completeness, including browser-only state | Requires inventory before archival writes | B1.1 |
 | Linux codecs, native SQLite module, and packaging | Requires packaged validation | B1.2 and B8.1 |
@@ -412,7 +425,7 @@ Avoid rerunning expensive live evaluations unnecessarily. Reuse recorded evidenc
 | Calendar delivery estimates | Not committed before feasibility | Reassess after B0 |
 | Optional video technique and MIDI | Outside current MVP | Future approved roadmap amendment |
 
-If a risk changes scope, sequence, architecture, cost, or data handling, document the proposed amendment and wait for approval.
+For technical or architectural risks, investigate, choose a solution, and document the reasoning without asking the user to decide. If the solution changes product scope, task sequence, acceptance criteria, costs, privacy/data-sharing/retention commitments, or an explicit consent boundary, document the proposed amendment and wait for approval.
 
 ## 7. Live project ledger
 
@@ -420,7 +433,7 @@ If a risk changes scope, sequence, architecture, cost, or data handling, documen
 
 The user approved saving this roadmap in the current conversation with the instruction: “The proposed roadmap looks good. I approve saving it as `PROJECT_ROADMAP.md`, with the following clarifications”. The subsequent “PLEASE IMPLEMENT THIS PLAN” message authorizes this document save; it does not supply a Go for any batch.
 
-The six approval conditions are:
+The six original approval conditions are preserved below as history. Condition 3's requirement for technical/architectural approval is superseded by the technical decision delegation in Section 2 and the policy amendment recorded below; the other consent and batch boundaries remain in force.
 
 1. Roadmap approval is not authorization to execute Batch 0.
 2. A Go authorizes the specified batch only; tasks within that batch may proceed sequentially without per-task approval.
@@ -430,6 +443,14 @@ The six approval conditions are:
 6. Do not initialize the application, archive the old project, run provider experiments, or modify anything else as part of this documentation-only action.
 
 No durable message permalink or approval timestamp was supplied; do not infer one. This section records documentation approval, not batch authorization.
+
+### POLICY-01 — Technical decision delegation
+
+- **Authority:** User instruction in this conversation: “I’m not a software engineer, so tell the agent in the PROJECT_ROADMAP.md to decide technical details yourself and don't ask me about them. Use your best judgment and record your reasoning.” No durable message permalink or exact timestamp was supplied.
+- **Scope:** Roadmap policy amendment only, outside the development task sequence. Delegate engineering and architectural choices to the agent; require recorded rationale and evidence; retain product-scope, cost, privacy, consent, destructive-action, Git, and batch approval gates.
+- **Status:** verified-awaiting-record; work commit pending. No development task is advanced or completed by this amendment.
+- **Verification:** Reviewed the roadmap diff against the user instruction; Python comparisons confirmed every batch task row, batch authorization entry, and development task ledger is unchanged. Checked retained batch, consent, Git, and experiment boundaries; `git diff --check` passed. Only `PROJECT_ROADMAP.md` changed. Documentation-only review; no application tests or provider runs were needed or performed.
+- **Historical treatment:** Prior approval and experiment records are retained. The new policy overrides generic technical-sign-off requirements, not specific consent or experiment restrictions.
 
 ### Batch authorization ledger
 
@@ -490,9 +511,11 @@ The initial roadmap save was documentation-only setup outside the development ba
 
 ### Architectural decision history
 
-D01–D08 are proposed. No technical approval is inferred from prior assistant proposals or approval to save the roadmap.
+D01–D08 remain technical candidates, not validated selections. The subsequent user delegation authorizes the agent to select and revise technical details with recorded reasoning, without user technical sign-off. Historical records describing these candidates as unapproved are preserved as records of their earlier state; they do not create a continuing technical-approval requirement. Explicit experiment, upload, cost, and batch restrictions remain binding.
 
 ### Current handoff
+
+- **Technical decision authority:** Agents own technical choices and document their rationale under Section 2; no user technical sign-off is required. Product/consent boundaries and the recorded B0.2 blocker remain unchanged.
 
 - **Active batch:** Batch 0, authorized and active.
 - **Current task:** B0.2 — blocked; B0.1 completed. Batch 0 remains active and authorized within its original scope.

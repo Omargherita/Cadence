@@ -448,7 +448,10 @@ No durable message permalink or approval timestamp was supplied; do not infer on
 
 - **Authority:** User instruction in this conversation: “I’m not a software engineer, so tell the agent in the PROJECT_ROADMAP.md to decide technical details yourself and don't ask me about them. Use your best judgment and record your reasoning.” No durable message permalink or exact timestamp was supplied.
 - **Scope:** Roadmap policy amendment only, outside the development task sequence. Delegate engineering and architectural choices to the agent; require recorded rationale and evidence; retain product-scope, cost, privacy, consent, destructive-action, Git, and batch approval gates.
-- **Status:** verified-awaiting-record; work commit pending. No development task is advanced or completed by this amendment.
+- **Status:** completed (documentation policy amendment only). No development task is advanced or completed by this amendment.
+- **Work commit:** `462f18ba48dce21384e2d58d6ffb4875a86bd294`.
+- **Completion date:** 2026-11-10.
+- **Outcome:** Agents decide engineering details and record reasoning; user-facing approval and consent boundaries remain intact. Verified the work commit with `git show --stat` and an ancestor check. No application changes, provider experiments, uploads, or pushes.
 - **Verification:** Reviewed the roadmap diff against the user instruction; Python comparisons confirmed every batch task row, batch authorization entry, and development task ledger is unchanged. Checked retained batch, consent, Git, and experiment boundaries; `git diff --check` passed. Only `PROJECT_ROADMAP.md` changed. Documentation-only review; no application tests or provider runs were needed or performed.
 - **Historical treatment:** Prior approval and experiment records are retained. The new policy overrides generic technical-sign-off requirements, not specific consent or experiment restrictions.
 

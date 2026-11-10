@@ -74,12 +74,12 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
   const [weaknesses, setWeaknesses] = useState<PieceWeakness[]>(piece.weaknesses || []);
 
   function reviewSession() {
-    return consumeReviewSession(piece.id);
+    try {const saved=JSON.parse(sessionStorage.getItem('cadence-review-session') ?? 'null');return saved?.pieceId===piece.id ? saved.sessionId as string : null;} catch {return null;}
   }
   useEffect(()=>{const select=()=>{const id=reviewSession();if(id)setSelectedSessionId(id);};window.addEventListener('cadence-review-session',select);return()=>window.removeEventListener('cadence-review-session',select);},[piece.id]);
   // Selected Session for Takes
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    () => reviewSession() ?? (piece.sessions.length > 0 ? piece.sessions[0].id : null)
+    reviewSession() ?? (piece.sessions.length > 0 ? piece.sessions[0].id : null)
   );
   const [sessionTakes, setSessionTakes] = useState<PracticeTake[]>([]);
   const [pendingTakes, setPendingTakes] = useState<PendingTake[]>([]);
@@ -206,7 +206,7 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
       userSelfReflection: metadata.userSelfReflection, attachedPdfPages: metadata.attachedPdfPages,
       includeVideoPostureAnalysis: metadata.includeVideoPostureAnalysis,
       mediaBlob: metadata.file, originalFileName: metadata.file.name,
-      mimeType: recordingMimeType(metadata.file), createdAtUtc: new Date().toISOString(),
+      mimeType: metadata.file.type, createdAtUtc: new Date().toISOString(),
     };
     await cadenceRepository.queueOfflineTake(pendingTake);
     await syncEngine.processOutbox();
@@ -759,9 +759,3 @@ export const PieceWorkspace: FC<PieceWorkspaceProps> = ({
     </div>
   );
 };
-
-export function recordingMimeType(file: File): string { return file.type || ({mp4:"video/mp4",mp3:"audio/mpeg",wav:"audio/wav"}[file.name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream"); }
-
-export function consumeReviewSession(pieceId:string):string|null {
-  try {const saved=JSON.parse(sessionStorage.getItem('cadence-review-session') ?? 'null');if(saved?.pieceId!==pieceId)return null;sessionStorage.removeItem('cadence-review-session');return saved.sessionId as string;} catch {return null;}
-}

@@ -52,7 +52,7 @@ export const api = {
   async getTasks(date?: string, signal?:AbortSignal): Promise<TaskItem[]> {
     const url = date ? `${BASE_URL}/tasks?date=${encodeURIComponent(date)}` : `${BASE_URL}/tasks`;
     const res = await fetch(url,{signal});
-    if (!res.ok) throw await buildApiError(res, 'Failed to fetch tasks');
+    if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.statusText}`);
     return res.json();
   },
 
@@ -94,7 +94,7 @@ export const api = {
 
   async getPiece(id: string, signal?:AbortSignal): Promise<Piece> {
     const res = await fetch(`${BASE_URL}/pieces/${id}`,{signal});
-    if (!res.ok) throw await buildApiError(res, 'Failed to fetch piece');
+    if (!res.ok) throw new Error(`Failed to fetch piece: ${res.statusText}`);
     return res.json();
   },
 

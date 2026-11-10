@@ -477,7 +477,10 @@ No durable message permalink or approval timestamp was supplied; do not infer on
 
 - **Authority:** User request in this conversation: “The work will be on a lot of thread so I don't want every time to tell the agent that I don't want many questions and to let it decide by itself what it should do so if you can edit the md file that would be great”. No durable message permalink or exact timestamp supplied.
 - **Scope:** Roadmap-only standing instruction for all future agents: execute an authorized batch independently, decide technical details, reuse valid decisions/consents, consolidate unavoidable questions, and preserve complete handoff records.
-- **Status:** verified-awaiting-record; work commit pending. This amendment does not advance any development task or authorize rollback/provider work.
+- **Status:** completed (documentation policy amendment only). This amendment does not advance any development task or authorize rollback/provider work.
+- **Work commit:** `ba2f73e1ccf92ca1ffdfeb259da7caeb4401d346`.
+- **Completion date:** 2026-11-10.
+- **Outcome:** Standing autonomous batch execution and minimal-question policy is persisted across threads; retained consent, cost, scope, destructive-action, and batch-boundary gates remain intact. Verified the work commit with `git show --stat` and an ancestor check. No application changes, provider experiments, uploads, commits, or pushes in this continuation step.
 - **Verification:** Read the complete roadmap and inspected Git history/status/diffs; all recorded SHAs are reachable. Reviewed the policy diff and used Python comparisons to verify all task rows, the batch authorization ledger, and the development task ledger remain unchanged. Checked retained consent/experiment/Git gates and ran `git diff --check`; passed. Only `PROJECT_ROADMAP.md` changed. No application tests required for this documentation-only amendment.
 - **Preserved boundaries:** Existing batch Go, personal-material consent, costs, destructive-action restrictions, experiment limits, Git discipline, verification requirements, and the B0.2 blocker remain in force.
 

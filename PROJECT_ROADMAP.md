@@ -8,7 +8,7 @@
 
 **Active batch:** Batch 0 (active).
 
-**Current task:** B0.2 audio-only pilot recovery — in_progress; full B0.2 qualification pending.
+**Current task:** B0.2 audio-only pilot — blocked on recovery evidence discrepancy; full qualification pending.
 
 **Verified repository baseline:** `2c205e5f81fdf38a87abbd1767d662755f21f943` on `main`; working tree was clean before this document was created.
 
@@ -475,6 +475,7 @@ No durable message permalink or approval timestamp was supplied; do not infer on
 - **Recovery authorization (2026-11-10):** User replied “yeah go ahead” to the immediately preceding concrete request: “Approve staging the same WAV in T3’s allowed attachment directory and one additional transport check?” Current conversation, no durable permalink/exact timestamp supplied. Authorizes that staging and one additional transport check only; original two coaching runs remain conditional on verified delivery. No hook bypass/expansion, other source, video, score, paid API or alternate provider.
 - **Recovery preparation:** Original extracted WAV hash matched the private manifest. Copied exact bytes with Python shutil to a unique mode-700 directory under `/home/omar/.t3/userdata/attachments/`; staged WAV mode 600 and SHA-256 match verified. Private `recovery-staging.json` records its exact path, size and hash outside Git. No musical alteration. Recovery transport check next; previous 1 check failed, original coaching runs remain 0/2.
 - **Recovery reconciliation:** Read roadmap, inspected clean main at `7d9c7a9caea8f016c8ccf5e7c1a7ae02fc464330`, diffs/log and evidence report/record commit; `6afa400f687be91c1564d85d1ffbc4b2f77578b8` ancestor check passed. No discrepancy. Reviewed roadmap-only authorization/preparation update; `git diff --cached --check` passed before commit.
+- **Recovery result (2026-11-10):** Single authorized recovery run finished. `t3_thread_read` activity exposes a completed Read event for staged WAV, resolving prior path denial, but no raw native MIME/byte payload proof. Delegate claims native audio and describes events through 3:21 despite ffprobe duration 3:08.517958. Rechecked staged hash/size/duration: unchanged. This is an objective timestamp discrepancy; do not accept listening as verified or infer that no audio was delivered. Updated evidence in `docs/batch-0/audio-pilot-report.md`, work commit awaiting creation. Total transport runs 2; coaching 0/2. Stop per user discrepancy rule. No full task completion claimed.
 - **Scope restriction:** Stop here as requested on blockers; B0.3–B0.V remain pending. Do not skip ahead or activate any paid service.
 
 All tasks after B0.2 remain `pending`, work commit `—`.
@@ -489,9 +490,9 @@ D01–D08 are proposed. No technical approval is inferred from prior assistant p
 
 - **Active batch:** Batch 0, authorized and active.
 - **Current task:** B0.2 — blocked; B0.1 completed. Batch 0 remains active and authorized within its original scope.
-- **Permitted next:** One authorized recovery transport check on staged identical audio; two original coaching runs only after verified delivery. Full qualification remains pending.
+- **Permitted next:** Record recovery evidence and report discrepancy; original coaching runs remain 0/2 and conditional on verified delivery. Full qualification remains pending.
 - **Not authorized:** Later batches, application initialization, legacy changes, archival operations, paid APIs, uploads before the B0.2 consent/destination gates are resolved, or pushing.
 - **Continuity verification (2026-11-10):** Read entire roadmap; inspected `git status --short --branch`, `git log -10 --format=fuller`, `git show HEAD -- docs/DEPLOY-STEPS.md`, staged and unstaged diffs, tracked-file inventory, legacy README and package manifests. HEAD is the recorded baseline on main. Only the expected untracked roadmap was present; both tracked diffs were empty. No completed task SHAs require reconciliation. Legacy commit/task labels do not represent rebuild progress. No discrepancy found.
 - **Latest continuity check (2026-11-10):** Working tree clean at `e6edf451c6b02cb8d713f358804d7823a5cab58e` before this consent update. Inspected roadmap, Git status/log/diffs, B0.1 work content and record/blocker commits; `git merge-base --is-ancestor a4deae7784457467ea0dae2592bb398846edd028 HEAD` passed. No discrepancy. Reviewed this roadmap-only update against the exact consent wording; `git diff --cached --check` passed before commit.
 - **Latest reconciliation:** On 2026-11-10, read roadmap, inspected clean main at `046eec3b10ec66ffd519e6e3608a2a0c436bb589`, Git log/diffs and relevant work/record content; B0.1 work SHA reachability passed. No repository discrepancy. Reviewed this update against the exact clarification/labels and original B0 gates; `git diff --cached --check` passed before commit.
-- **Next action:** Start the single authorized recovery transport check via Gemini 4 Argon/Antigravity on T3. Stop on failure without substitutions.
+- **Next action:** Stop and report recovery discrepancy: tool path access succeeded, native-payload proof incomplete, and listening timestamps extend beyond EOF. Await user decision; no coaching or further upload/model run now.

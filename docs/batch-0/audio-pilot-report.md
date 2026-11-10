@@ -72,3 +72,23 @@ Both succeeded: one audio stream, 188.517958 seconds, 36,195,492 bytes, SHA-256 
 Updated disposition: 2 transport runs used (the original and one authorized recovery); coaching 0/2. Path access succeeded, but independent native-payload evidence remains incomplete and the listening account has objectively invalid timestamps. This does not prove audio was absent; it prevents accepting the account as successful listening verification. Stop on this discrepancy under the user's instruction; no coaching, additional upload, or model retry started. Full B0.2/Batch 0 remain pending and D04 unapproved.
 
 Next proposed action, requiring a decision before further experiments: examine native payload-level delivery evidence if available through supported diagnostics, then decide whether to continue the original two coaching runs as explicitly unqualified exploratory evaluations. No extra model run, new material, paid API, or alternate route is authorized by this report.
+
+## Offline artifact inspection — original WAV found (2026-11-10)
+
+Authority: user approved “offline inspection of the existing tool-result artifact only, no upload and no new model run,” and required showing the excerpt, expected events and pass criteria and waiting for approval before any follow-up listening test. This supersedes any assumption that the two coaching runs may start automatically.
+
+Outcome branch: **original WAV present**. The recovery conversation's existing local SQLite database contains a 36,297,172-byte blob in `gen_metadata`, row `idx=1`. Within that blob, at byte offset 35,674, is a complete 36,195,492-byte RIFF/WAVE payload. Its RIFF length field, WAVE signature, byte-for-byte equality and SHA-256 match the original prepared WAV. The nearby preceding bytes contain `audio/wav` and a temporary-media WAV reference. This is direct persisted-artifact evidence, stronger than the delegate's prose claim. It is generation metadata associated with the tool-use exchange; the opaque serialization has not been fully decoded into a provider request schema, so it is not claimed to be a captured server-side model request or proof of internal model decoding.
+
+Verified payload properties using Python's wave reader: 2 channels, 48,000 Hz, 2 bytes per sample, 9,048,862 frames, 188.51795833333333 seconds. SHA-256: `18dbc63d26990015ce89550743e3d0707ab897f1b8ca69b3722ce76c8ef7a9ec`. Containing blob SHA-256: `0925502d7c9e9781471733454e592857c2ba8bc81db2896925924552b5c8ed1a`.
+
+Inspection procedure actually performed:
+
+1. Scoped file discovery to the Antigravity provider directory for the known recovery conversation UUID. Located its existing conversations/18162741-50e9-43ec-9abe-b2a1cfaa130d.db and SQLite sidecars. No provider process was started and no external endpoint accessed.
+2. Opened the database through Python sqlite3 with `mode=ro`; inspected table schemas and blob lengths/selected media marker counts. Did not print raw conversation blobs, audio bytes, credentials, or unrelated conversation content.
+3. Read `SELECT data FROM gen_metadata WHERE idx=1`. Located the RIFF signature, read its little-endian uint32 size at offset +4 and added 8, checked the WAVE signature at +8, and sliced exactly that declared payload length.
+4. Compared those bytes directly to the existing local extract, computed SHA-256, and opened the payload with wave.open(io.BytesIO(payload), 'rb') to measure frames/rate/duration. All assertions passed. Inspected only the immediately preceding media reference/type context. No converted audio was needed to explain this payload.
+5. Wrote selected non-content results to private offline-artifact-inspection.json alongside the existing local manifest (mode 600). No database, raw payload, private recording or raw sensitive log is committed.
+
+Interpretation: the persisted media payload is the correct, complete original extract at the original sample rate. Wrong-file substitution, truncation, or a stretched conversion in this recorded payload do not explain the 3:21 claim. Timing estimation error, invented details, or later internal decoding/processing remain possible. This inspection cannot distinguish those remaining causes, certify that the model attended to the audio, or qualify musical listening quality. The invalid beyond-EOF statements remain invalid.
+
+No upload, new model run, coaching, excerpt creation or follow-up test occurred. Transport run count remains 2 and coaching 0/2. D04 stays unapproved; full B0.2 and Batch 0 remain pending. Before another listening test, present the actual proposed excerpt, independently checked expected events and explicit pass criteria to the user and wait for approval. Do not reuse the suspect recovery descriptions as ground truth.

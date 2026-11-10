@@ -8,7 +8,7 @@
 
 **Active batch:** Batch 0 (active).
 
-**Next pending task:** B0.2.
+**Current task:** B0.2 — blocked (evaluation corpus and consent decisions required).
 
 **Verified repository baseline:** `2c205e5f81fdf38a87abbd1767d662755f21f943` on `main`; working tree was clean before this document was created.
 
@@ -451,7 +451,16 @@ No durable message permalink or approval timestamp was supplied; do not infer on
 - **Limitations:** Documentation review only; no runtime, packaging, transport or musical-quality claim. No stack approval inferred; no live experiment or upload. No approved deviations.
 - **Completion date:** 2026-11-10.
 
-All remaining tasks are `pending`, work commit `—`.
+#### B0.2 — blocked
+
+- **Status/date:** blocked, 2026-11-10; no deliverable/work commit and no live experiment performed.
+- **Prerequisite review:** Reviewed B0.2 scope/acceptance, Section 6 evaluation-material risk, authorization ledger, and tracked-file inventory from continuity checks. No evaluation corpus, predetermined musical labels, upload consent, or permitted evaluation account is recorded. Legacy sources/tests are not an approved musical evaluation corpus.
+- **Blocker:** Selecting representative real piano materials and establishing permission to upload them and use a provider account requires user input. Batch 0 Go explicitly does not supply personal-material upload consent. Synthetic controls can cover transport failures but cannot alone establish expressive coaching credibility.
+- **Required input:** Identify the intended provider/account for Batch 0 experiments and permitted use; choose user-selected score/recording excerpts or a rights-checked public/licensed corpus. For user-owned materials, identify the exact files/excerpts and explicitly consent to sending them to that provider for Batch 0 transport/coaching/comparison evaluation. Identify who will validate musical ground truth and blind ratings. Do not supply passwords or tokens in chat.
+- **Resume condition:** Record these choices and any specific consent, then finish corpus provenance, predetermined labels and frozen rubric/denominators before any evaluation. A new Batch 0 Go is not required within the existing scope.
+- **Scope restriction:** Stop here as requested on blockers; B0.3–B0.V remain pending. Do not skip ahead or activate any paid service.
+
+All tasks after B0.2 remain `pending`, work commit `—`.
 
 The initial roadmap save was documentation-only setup outside the development batches. Its expected untracked state was verified before Batch 0; it is preserved and first committed with the B0.1 work and authorization record.
 
@@ -462,8 +471,8 @@ D01–D08 are proposed. No technical approval is inferred from prior assistant p
 ### Current handoff
 
 - **Active batch:** Batch 0, authorized and active.
-- **Next task:** B0.2 — pending; B0.1 completed.
-- **Permitted now:** Sequential Batch 0 work, subject to consent and decision gates.
+- **Current task:** B0.2 — blocked; B0.1 completed. Batch 0 remains active and authorized within its original scope.
+- **Permitted next:** Resolve the recorded B0.2 corpus/account/consent/ground-truth decisions, then resume B0.2 in order. No dependent experiment now.
 - **Not authorized:** Later batches, application initialization, legacy changes, archival operations, paid APIs, personal-material uploads, or pushing.
 - **Continuity verification (2026-11-10):** Read entire roadmap; inspected `git status --short --branch`, `git log -10 --format=fuller`, `git show HEAD -- docs/DEPLOY-STEPS.md`, staged and unstaged diffs, tracked-file inventory, legacy README and package manifests. HEAD is the recorded baseline on main. Only the expected untracked roadmap was present; both tracked diffs were empty. No completed task SHAs require reconciliation. Legacy commit/task labels do not represent rebuild progress. No discrepancy found.
-- **Next action:** Inspect B0.2 prerequisites; stop and report if corpus, ground truth, consent, or account-use decisions require user input.
+- **Next action:** Stop and report B0.2 blocker; await the specified user input. No later task or batch started.
